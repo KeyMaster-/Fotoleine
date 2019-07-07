@@ -1,0 +1,6 @@
+[submodule "deps/imgui-rs"]
+	path = deps/imgui-rs
+	url = https://github.com/KeyMaster-/imgui-rs.git
+[submodule "deps/glium"]
+	path = deps/glium
+	url = https://github.com/KeyMaster-/glium.git
