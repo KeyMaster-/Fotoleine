@@ -89,8 +89,17 @@ pub fn end_frame<'ui>(ui:Ui<'ui>, platform:&WinitPlatform, display:&Display)->&'
 }
 
 pub trait Program {
-  fn on_event(&mut self, event:&Event<()>)->bool;
-  fn on_draw(&mut self, framework:&mut Framework);
+  fn on_event(&mut self, event:&Event<()>)->LoopSignal;
+  fn on_frame(&mut self, framework:&mut Framework)->LoopSignal;
+}
+
+  // The ordering determines "strength", lower signals are stronger and override weaker (higher up) signals
+  // I.e. Exit > Redraw > Wait
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub enum LoopSignal {
+  Wait,
+  Redraw,
+  Exit
 }
 
 pub fn run<P:'static + Program>(event_loop:EventLoop<()>, mut framework: Framework, mut program: P) {
@@ -101,14 +110,8 @@ pub fn run<P:'static + Program>(event_loop:EventLoop<()>, mut framework: Framewo
 
     internal_handle_event(&mut framework.imgui, &mut framework.platform, &framework.display, &event);
 
-    let should_exit = program.on_event(&event);
-    if should_exit {
-      *control_flow = ControlFlow::Exit;
-      return
-    }
-
-    *control_flow = ControlFlow::Wait;
-
+    let mut loop_signal = program.on_event(&event);
+    
     match event {
       Event::WindowEvent{event:win_event, .. } => {
         match win_event {
@@ -116,7 +119,9 @@ pub fn run<P:'static + Program>(event_loop:EventLoop<()>, mut framework: Framewo
             let io = framework.imgui.io_mut();
             last_frame = io.update_delta_time(last_frame);
 
-            program.on_draw(&mut framework);
+            let frame_loop_signal = program.on_frame(&mut framework);
+            loop_signal = loop_signal.max(frame_loop_signal);
+
               // imgui doesn't react to some events on the same frame they arrive at, but rather one frame late
               // E.g. if a mouse release arrives, the first frame rendered after that won't see its effects, only the second
               // So for every event that arrives, we actually do two redraws, to be sure those events take effect
@@ -127,21 +132,24 @@ pub fn run<P:'static + Program>(event_loop:EventLoop<()>, mut framework: Framewo
               let window = gl_window.window();
               window.request_redraw();
             }
-          },
-          WindowEvent::Resized { .. } | WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
-          WindowEvent::KeyboardInput { .. } | 
-          WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } |
-          WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } => {
-            let gl_window = framework.display.gl_window();
-            let window = gl_window.window();
-            window.request_redraw();
-            first_redraw = true;
-          },
+          }
           _ => {}
         }
       },
       _ => {}
-    }
+    };
+
+    *control_flow = match loop_signal {
+      LoopSignal::Wait => ControlFlow::Wait,
+      LoopSignal::Redraw => {
+        let gl_window = framework.display.gl_window();
+        let window = gl_window.window();
+        window.request_redraw();
+        first_redraw = true;
+        ControlFlow::Wait
+      },
+      LoopSignal::Exit => ControlFlow::Exit
+    };
   });
 }
 
@@ -150,4 +158,3 @@ fn internal_handle_event(imgui:&mut Context, platform:&mut WinitPlatform, displa
   let window = gl_window.window();
   platform.handle_event(imgui.io_mut(), window, event);
 }
-

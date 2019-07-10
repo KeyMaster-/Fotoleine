@@ -1,31 +1,97 @@
+use std::path::Path;
+use std::ffi::OsStr;
+use std::fs::{self, DirEntry};
 use imgui::*;
 use glium::Surface;
 use glium::glutin::event::{Event, WindowEvent};
-use support::{init, Program, Framework, run, begin_frame, end_frame};
+use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
 
 mod support;
 
 struct Fotoleine {
-  test_val: i32
+  root_path:Option<Box<Path>>
+}
+
+impl Fotoleine {
+  fn filter_entry(entry:&DirEntry)->bool {
+    let path = entry.path();
+    if !path.is_file() {
+      return false;
+    }
+
+    let ext_str = path.extension().and_then(|ext| ext.to_str());
+
+    if ext_str.is_none() { // no extension, or no unicode extension
+      return false;
+    }
+    let ext_matches = ext_str.unwrap().to_lowercase() == "jpg";
+
+    let stem_str = path.file_stem().and_then(|stem| stem.to_str());
+    if stem_str.is_none() { // no stem, or no unicode stem
+      return false;
+    }
+    let stem_okay = !stem_str.unwrap().starts_with("._");
+
+    ext_matches && stem_okay
+  }
+
+  fn set_path(&mut self, path:Box<Path>)->bool {
+    if path.is_dir() {
+      self.root_path = Some(path);
+
+      let dir_iter = fs::read_dir(self.root_path.as_ref().unwrap());
+      if dir_iter.is_err() {
+        return false;
+      }
+
+      let jpgs:Vec<_> = dir_iter.unwrap()
+        .filter_map(|entry_res| entry_res.ok())
+        .filter(|entry| Fotoleine::filter_entry(entry))
+        .collect();
+
+      println!("{:?}", jpgs);
+      return true;
+    } else {
+      return false;
+    }
+  }
 }
 
 impl Program for Fotoleine {
-  fn on_event(&mut self, event:&Event<()>)->bool {
+  fn on_event(&mut self, event:&Event<()>)->LoopSignal {
+
+    let loop_signal = match event {
+      Event::WindowEvent{event:win_event, .. } => {
+        match win_event {
+          WindowEvent::CloseRequested 
+            => LoopSignal::Exit,
+          WindowEvent::Resized { .. } | WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
+          WindowEvent::KeyboardInput { .. } | 
+          WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } |
+          WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } 
+            => LoopSignal::Redraw,
+          _ => LoopSignal::Wait
+        }
+      },
+      _ => LoopSignal::Wait
+    };
+
     match event {
       Event::WindowEvent{event:win_event, .. } => {
         match win_event {
-          WindowEvent::CloseRequested => {
-            return true;
-          },
+          WindowEvent::DroppedFile(path) => {
+            self.set_path(path.clone().into_boxed_path());
+          }
           _ => {}
         }
       },
       _ => {}
-    }
-    return false;
+    };
+
+    loop_signal
   }
 
-  fn on_draw(&mut self, framework:&mut Framework) {
+  fn on_frame(&mut self, framework:&mut Framework)->LoopSignal {
     let Framework {
       ref display,
       ref platform,
@@ -34,7 +100,7 @@ impl Program for Fotoleine {
     } = framework;
 
     let mut ui = begin_frame(imgui, platform, display);
-    ui_cb(&mut ui);
+    build_ui(&mut ui);
     let draw_data = end_frame(ui, platform, display);
 
     let mut target = display.draw();
@@ -44,10 +110,12 @@ impl Program for Fotoleine {
       .render(&mut target, draw_data)
       .expect("Rendering failed");
     target.finish().expect("Failed to swap buffers");
+
+    LoopSignal::Wait
   }
 }
 
-fn ui_cb(ui:&mut Ui) {
+fn build_ui(ui:&mut Ui) {
   ui.window(im_str!("Hello world"))
     .size([300.0, 100.0], Condition::FirstUseEver)
     .build(|| {
@@ -67,7 +135,7 @@ fn ui_cb(ui:&mut Ui) {
 fn main() {
   let (event_loop, framework) = init("fotoleine");
   let fotoleine = Fotoleine {
-    test_val: 5
+    root_path: None
   };
 
   run(event_loop, framework, fotoleine);
