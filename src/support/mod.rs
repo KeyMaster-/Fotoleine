@@ -3,40 +3,27 @@ use glium::glutin::window::{WindowBuilder};
 use glium::glutin::event_loop::{EventLoop, ControlFlow};
 use glium::glutin::event::Event;
 use glium::glutin::event::WindowEvent;
-use glium::{Display, Surface};
-use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui};
+use glium::Display;
+use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui, DrawData};
 use imgui_glium_renderer::GliumRenderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::time::Instant;
 
-#[derive(Debug)]
-pub enum LoopSignal {
-  Wait, // don't render, wait for next event
-  Quit, // exit loop
-  Render, // render the imgui ui
-}
-
-pub struct System {
-  pub events_loop: EventLoop<()>,
+pub struct Framework {
   pub display: Display,
-  pub imgui: Context,
   pub platform: WinitPlatform,
+  pub imgui: Context,
   pub renderer: GliumRenderer,
-  pub font_size: f32,
 }
 
-pub fn init(title: &str) -> System {
-  let title = match title.rfind('/') {
-    Some(idx) => title.split_at(idx + 1).1,
-    None => title,
-  };
-  let events_loop = EventLoop::new();
+pub fn init(title: &str) -> (EventLoop<()>, Framework) {
+  let event_loop = EventLoop::new();
   let context = ContextBuilder::new().with_vsync(true);
   let builder = WindowBuilder::new()
     .with_title(title.to_owned())
     .with_inner_size(glutin::dpi::LogicalSize::new(1024f64, 768f64));
   let display =
-    Display::new(builder, context, &events_loop).expect("Failed to initialize display");
+    Display::new(builder, context, &event_loop).expect("Failed to initialize display");
 
   let mut imgui = Context::create();
   imgui.set_ini_filename(None);
@@ -73,145 +60,94 @@ pub fn init(title: &str) -> System {
   let renderer =
     GliumRenderer::init(&mut imgui, &display).expect("Failed to initialize renderer");
 
-  System {
-    events_loop,
+  let framework = Framework {
     display,
-    imgui,
     platform,
-    renderer,
-    font_size,
-  }
+    imgui,
+    renderer
+  };
+
+  (event_loop, framework)
 }
 
-impl System {
-  // fn test() {
-  //     println!("hi");
-  // }
+pub fn begin_frame<'ui>(imgui:&'ui mut Context, platform:&WinitPlatform, display:&Display)->Ui<'ui> {
+  let io = imgui.io_mut();
+  let gl_window = display.gl_window();
+  let window = gl_window.window();
+  platform
+    .prepare_frame(io, window)
+    .expect("Failed to start frame");
+  
+  imgui.frame()
+}
 
-  pub fn main_loop<
-    // EventF: FnMut(&Event<()>)->LoopSignal,
-    // UiF: 'static + FnMut(&mut Ui)->bool>(self, mut process_events:EventF, mut run_ui: UiF) {
+pub fn end_frame<'ui>(ui:Ui<'ui>, platform:&WinitPlatform, display:&Display)->&'ui DrawData {
+  let gl_window = display.gl_window();
+  let window = gl_window.window();
+  platform.prepare_render(&ui, window);
+  ui.render()
+}
 
-    UiF: 'static + FnMut(&mut Ui)->bool>(self, mut run_ui: UiF) {
-    let System {
-      events_loop,
-      display,
-      mut imgui,
-      mut platform,
-      mut renderer,
-      ..
-    } = self;
-    let mut last_frame = Instant::now();
+pub trait Program {
+  fn on_event(&mut self, event:&Event<()>)->bool;
+  fn on_draw(&mut self, framework:&mut Framework);
+}
 
-    events_loop.run(move |event, _, control_flow| {
-      let gl_window = display.gl_window();
-      let window = gl_window.window();
+pub fn run<P:'static + Program>(event_loop:EventLoop<()>, mut framework: Framework, mut program: P) {
+  let mut last_frame = Instant::now();
+  let mut first_redraw = false;
 
-      platform.handle_event(imgui.io_mut(), &window, &event);
+  event_loop.run(move |event, _, control_flow| {
 
-      *control_flow = ControlFlow::Wait;
+    internal_handle_event(&mut framework.imgui, &mut framework.platform, &framework.display, &event);
 
-      match event {
-        Event::WindowEvent{event:win_event, .. } => {
-          match win_event {
-            WindowEvent::CloseRequested => {
-              *control_flow = ControlFlow::Exit
-            },
-            WindowEvent::RedrawRequested => {
-              println!("redrawing");
-              let io = imgui.io_mut();
-              platform
-                .prepare_frame(io, &window)
-                .expect("Failed to start frame");
-              last_frame = io.update_delta_time(last_frame);
-              let mut ui = imgui.frame();
-              run_ui(&mut ui);
+    let should_exit = program.on_event(&event);
+    if should_exit {
+      *control_flow = ControlFlow::Exit;
+      return
+    }
 
-              let mut target = display.draw();
-              target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
-              platform.prepare_render(&ui, &window);
-              let draw_data = ui.render();
-              renderer
-                .render(&mut target, draw_data)
-                .expect("Rendering failed");
-              target.finish().expect("Failed to swap buffers");
-            },
-            WindowEvent::Resized { .. } | WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
-            WindowEvent::KeyboardInput { .. } | 
-            WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } |
-            WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } => {
+    *control_flow = ControlFlow::Wait;
+
+    match event {
+      Event::WindowEvent{event:win_event, .. } => {
+        match win_event {
+          WindowEvent::RedrawRequested => {
+            let io = framework.imgui.io_mut();
+            last_frame = io.update_delta_time(last_frame);
+
+            program.on_draw(&mut framework);
+              // imgui doesn't react to some events on the same frame they arrive at, but rather one frame late
+              // E.g. if a mouse release arrives, the first frame rendered after that won't see its effects, only the second
+              // So for every event that arrives, we actually do two redraws, to be sure those events take effect
+              // Doing this through two requests is crucial for framerate, if we just did draw_ui twice here every frame would effectively be twice as long
+            if first_redraw {
+              first_redraw = false;
+              let gl_window = framework.display.gl_window();
+              let window = gl_window.window();
               window.request_redraw();
-              println!("redraw requested");
-            },
-            _ => {}
-          }
-        },
-        _ => {}
-      }
-
-      // let mut loop_signal = process_events(&event);
-      // match loop_signal {
-      //   LoopSignal::Wait => {
-      //     if render_decay != 0 {
-      //       loop_signal = LoopSignal::Render;
-      //       render_decay -= 1;
-      //     }
-      //   },
-      //   LoopSignal::Render => {
-      //     render_decay = RENDER_DECAY_TIME;
-      //   },
-      //   LoopSignal::Quit => {}
-      // }
-
-      // match loop_signal {
-      //   LoopSignal::Wait => ControlFlow::Continue,
-      //   LoopSignal::Quit => ControlFlow::Break,
-      //   LoopSignal::Render => {
-      //     let io = imgui.io_mut();
-      //     platform
-      //       .prepare_frame(io, &window)
-      //       .expect("Failed to start frame");
-      //     last_frame = io.update_delta_time(last_frame);
-      //     let mut ui = imgui.frame();
-      //     let keep_running = run_ui(&mut ui);
-
-      //     let mut target = display.draw();
-      //     target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
-      //     platform.prepare_render(&ui, &window);
-      //     let draw_data = ui.render();
-      //     renderer
-      //       .render(&mut target, draw_data)
-      //       .expect("Rendering failed");
-      //     target.finish().expect("Failed to swap buffers");
-
-      //     if keep_running {
-      //       ControlFlow::Continue
-      //     } else {
-      //       ControlFlow::Break
-      //     }
-      //   }
-      // }
-    });
-
-    // while run {
-      
-
-    //   let io = imgui.io_mut();
-    //   platform
-    //     .prepare_frame(io, &window)
-    //     .expect("Failed to start frame");
-    //   last_frame = io.update_delta_time(last_frame);
-    //   let mut ui = imgui.frame();
-    //   run_ui(&mut run, &mut ui);
-
-    //   let mut target = display.draw();
-    //   target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
-    //   platform.prepare_render(&ui, &window);
-    //   let draw_data = ui.render();
-    //   renderer
-    //     .render(&mut target, draw_data)
-    //     .expect("Rendering failed");
-    //   target.finish().expect("Failed to swap buffers");
-    // }
-  }
+            }
+          },
+          WindowEvent::Resized { .. } | WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
+          WindowEvent::KeyboardInput { .. } | 
+          WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } |
+          WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } => {
+            let gl_window = framework.display.gl_window();
+            let window = gl_window.window();
+            window.request_redraw();
+            first_redraw = true;
+          },
+          _ => {}
+        }
+      },
+      _ => {}
+    }
+  });
 }
+
+fn internal_handle_event(imgui:&mut Context, platform:&mut WinitPlatform, display:&Display, event:&Event<()>) {
+  let gl_window = display.gl_window();
+  let window = gl_window.window();
+  platform.handle_event(imgui.io_mut(), window, event);
+}
+

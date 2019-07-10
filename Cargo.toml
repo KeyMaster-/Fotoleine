@@ -1,5 +1,5 @@
 [package]
-name = "imgui_test"
+name = "fotoleine"
 version = "0.1.0"
 authors = ["Tilman Schmidt <AccessKeymaster@gmx.net>"]
 edition = "2018"

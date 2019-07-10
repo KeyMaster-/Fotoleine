@@ -273,6 +273,17 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "fotoleine"
+version = "0.1.0"
+dependencies = [
+ "glium 0.25.0-glutin22",
+ "image 0.21.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "imgui 0.1.0-pre-glutin",
+ "imgui-glium-renderer 0.1.0-pre-glutin",
+ "imgui-winit-support 0.1.0-pre-glutin",
+]
+
+[[package]]
 name = "fuchsia-cprng"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -452,17 +463,6 @@ version = "0.1.0-pre-glutin"
 dependencies = [
  "imgui 0.1.0-pre-glutin",
  "winit 0.20.0-alpha1 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "imgui_test"
-version = "0.1.0"
-dependencies = [
- "glium 0.25.0-glutin22",
- "image 0.21.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "imgui 0.1.0-pre-glutin",
- "imgui-glium-renderer 0.1.0-pre-glutin",
- "imgui-winit-support 0.1.0-pre-glutin",
 ]
 
 [[package]]
