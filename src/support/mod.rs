@@ -89,7 +89,7 @@ pub fn end_frame<'ui>(ui:Ui<'ui>, platform:&WinitPlatform, display:&Display)->&'
 }
 
 pub trait Program {
-  fn on_event(&mut self, event:&Event<()>)->LoopSignal;
+  fn on_event(&mut self, event:&Event<()>, framework:&mut Framework)->LoopSignal;
   fn on_frame(&mut self, framework:&mut Framework)->LoopSignal;
 }
 
@@ -110,7 +110,7 @@ pub fn run<P:'static + Program>(event_loop:EventLoop<()>, mut framework: Framewo
 
     internal_handle_event(&mut framework.imgui, &mut framework.platform, &framework.display, &event);
 
-    let mut loop_signal = program.on_event(&event);
+    let mut loop_signal = program.on_event(&event, &mut framework);
     
     match event {
       Event::WindowEvent{event:win_event, .. } => {
