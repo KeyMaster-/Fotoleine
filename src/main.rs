@@ -1,9 +1,8 @@
 use std::path::Path;
-use std::ffi::OsStr;
 use std::fs::{self, DirEntry};
 use imgui::*;
 use glium::Surface;
-use glium::glutin::event::{Event, WindowEvent};
+use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
 use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
 
 mod support;
@@ -99,8 +98,16 @@ impl Program for Fotoleine {
       ref mut renderer
     } = framework;
 
+    let mut loop_signal = LoopSignal::Wait;
+
     let mut ui = begin_frame(imgui, platform, display);
+
     build_ui(&mut ui);
+
+    if ui.is_key_pressed(VirtualKeyCode::Q as _) && ui.io().key_super {
+      loop_signal = LoopSignal::Exit;
+    }
+
     let draw_data = end_frame(ui, platform, display);
 
     let mut target = display.draw();
@@ -111,7 +118,7 @@ impl Program for Fotoleine {
       .expect("Rendering failed");
     target.finish().expect("Failed to swap buffers");
 
-    LoopSignal::Wait
+    loop_signal
   }
 }
 
