@@ -11,5 +11,4 @@ glium = { version = "0.25.0-glutin22", default-features = true, path="deps/glium
 imgui = { version = "0.1.0-pre-glutin", path = "deps/imgui-rs" }
 imgui-glium-renderer = { version = "0.1.0-pre-glutin", path = "deps/imgui-rs/imgui-glium-renderer" }
 imgui-winit-support = { version = "0.1.0-pre-glutin", path = "deps/imgui-rs/imgui-winit-support" }
-  # using image2 because it seems to load images ~10% faster, particularly on high-detail images with lots 
-image2 = "0.11"
+stb_image = "0.2"

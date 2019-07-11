@@ -11,8 +11,7 @@ use glium::{
 };
 use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
 use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
-use image2::{io, ImageBuf, Rgb, image::Image};
-use std::time::Instant;
+use stb_image::image::{self, LoadResult, Image};
 
 mod support;
 
@@ -64,16 +63,18 @@ impl Fotoleine {
 
       println!("{:?}", jpgs);
 
-      let before_load = Instant::now();
-      let img_res:Result<ImageBuf<u8, Rgb>, _> = io::read(jpgs[0].path());
-      println!("{}", before_load.elapsed().as_millis() as f64 / 1000.0);
+      let img_res = image::load(jpgs[0].path());
 
-      if let Ok(img) = img_res {
-        let width = img.width();
-        let height = img.height();
-        let pixels = img.inner();
+      if let LoadResult::ImageU8(img) = img_res {
+        let Image {
+          width,
+          height,
+          data,
+          ..
+        } = img;
+
         let raw_img = RawImage2d {
-          data: Cow::Owned(pixels),
+          data: Cow::Owned(data),
           width: width as u32,
           height: height as u32,
           format: ClientFormat::U8U8U8,
