@@ -16,12 +16,12 @@ pub struct Framework {
   pub renderer: GliumRenderer,
 }
 
-pub fn init(title: &str) -> (EventLoop<()>, Framework) {
+pub fn init(title: &str, window_size: [i32; 2]) -> (EventLoop<()>, Framework) {
   let event_loop = EventLoop::new();
   let context = ContextBuilder::new().with_vsync(true);
   let builder = WindowBuilder::new()
     .with_title(title.to_owned())
-    .with_inner_size(glutin::dpi::LogicalSize::new(1024f64, 768f64));
+    .with_inner_size(glutin::dpi::LogicalSize::new(window_size[0] as f64, window_size[1] as f64));
   let display =
     Display::new(builder, context, &event_loop).expect("Failed to initialize display");
 

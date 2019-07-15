@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::borrow::Cow;
 use std::rc::Rc;
 use std::path::Path;
@@ -15,14 +16,152 @@ use stb_image::image::{self, LoadResult, Image};
 
 mod support;
 
+struct ImguiImage {
+  id: TextureId,
+  size: [usize; 2]
+}
+
+struct PlacedImage {
+  image: ImguiImage,
+  pos: [f32; 2],
+  scale: f32
+}
+
 struct Fotoleine {
-  root_path:Option<Box<Path>>,
-  image:Option<TextureId>,
-  image_size: [f32; 2]
+  view_area_size: [f32; 2],
+  root_path: Option<Box<Path>>,
+  image_entries: Option<Vec<DirEntry>>,
+  image_idx: i32,
+  image: Option<PlacedImage>
+}
+
+impl ImguiImage {
+  fn from_data<F: Facade>(image:Image<u8>, gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>)->Result<ImguiImage, Box<dyn Error>> {
+    let Image {
+      width,
+      height,
+      data,
+      ..
+    } = image;
+
+    let raw_img = RawImage2d {
+      data: Cow::Owned(data),
+      width: width as u32,
+      height: height as u32,
+      format: ClientFormat::U8U8U8,
+    };
+
+    let size = [width, height];
+    
+    let gl_texture = Texture2d::new(gl_ctx, raw_img)?;
+    let id = textures.insert(Rc::new(gl_texture));
+
+    Ok(ImguiImage {
+      id,
+      size
+    })
+  }
+}
+
+const AREA_FLAGS:ImGuiWindowFlags = ImGuiWindowFlags::from_bits_truncate(ImGuiWindowFlags::NoTitleBar.bits() | ImGuiWindowFlags::NoResize.bits() | ImGuiWindowFlags::NoMove.bits() | ImGuiWindowFlags::NoScrollbar.bits() | ImGuiWindowFlags::NoScrollWithMouse.bits() | ImGuiWindowFlags::NoCollapse.bits());
+
+impl Program for Fotoleine {
+  fn on_event(&mut self, event:&Event<()>, framework:&mut Framework)->LoopSignal {
+
+    let loop_signal = match event {
+      Event::WindowEvent{event:win_event, .. } => {
+        match win_event {
+          WindowEvent::CloseRequested 
+            => LoopSignal::Exit,
+          WindowEvent::Resized { .. } | WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
+          WindowEvent::KeyboardInput { .. } | 
+          WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } |
+          WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } 
+            => LoopSignal::Redraw,
+          _ => LoopSignal::Wait
+        }
+      },
+      _ => LoopSignal::Wait
+    };
+
+    match event {
+      Event::WindowEvent{event:win_event, .. } => {
+        match win_event {
+          WindowEvent::DroppedFile(path) => {
+            self.set_path(path.clone().into_boxed_path(), framework.display.get_context(), framework.renderer.textures());
+            if let Some(ref mut placed_img) = self.image {
+              placed_img.place_to_fit(self.view_area_size, 20.0);
+            }
+          }
+          _ => {}
+        }
+      },
+      _ => {}
+    };
+
+    loop_signal
+  }
+
+  fn on_frame(&mut self, framework:&mut Framework)->LoopSignal {
+    let Framework {
+      ref display,
+      ref platform,
+      ref mut imgui,
+      ref mut renderer
+    } = framework;
+
+    let mut loop_signal = LoopSignal::Wait;
+
+    let mut ui = begin_frame(imgui, platform, display);
+
+    if ui.is_key_pressed(VirtualKeyCode::Q as _) && ui.io().key_super {
+      loop_signal = LoopSignal::Exit;
+    }
+
+    if ui.is_key_pressed(VirtualKeyCode::A as _) {
+      self.change_image(-1, display.get_context(), renderer.textures());
+    } else if ui.is_key_pressed(VirtualKeyCode::D as _) {
+      self.change_image( 1, display.get_context(), renderer.textures());
+    }
+
+    self.build_ui(&mut ui);
+
+    let draw_data = end_frame(ui, platform, display);
+
+    let mut target = display.draw();
+    target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
+
+    renderer
+      .render(&mut target, draw_data)
+      .expect("Rendering failed");
+    target.finish().expect("Failed to swap buffers");
+
+    loop_signal
+  }
+}
+
+impl PlacedImage {
+  fn scaled_size(&self)->[f32; 2] {
+    let mut size = [self.image.size[0] as f32, self.image.size[1] as f32];
+    size[0] *= self.scale;
+    size[1] *= self.scale;
+    return size;
+  }
+
+    // sets scale to fit into a rectangle of `size`, and centers itself within that rectangle
+  fn place_to_fit(&mut self, size:[f32; 2], padding:f32) {
+    let x_scale = size[0] / ((self.image.size[0] as f32) + padding);
+    let y_scale = size[1] / ((self.image.size[1] as f32) + padding);
+    self.scale = x_scale.min(y_scale);
+
+    let scaled_size = self.scaled_size();
+    self.pos[0] = size[0] / 2.0 - scaled_size[0] / 2.0;
+    self.pos[1] = size[1] / 2.0 - scaled_size[1] / 2.0;
+  }
 }
 
 impl Fotoleine {
-  fn filter_entry(entry:&DirEntry)->bool {
+  fn is_relevant_file(entry:&DirEntry)->bool {
     let path = entry.path();
     if !path.is_file() {
       return false;
@@ -56,144 +195,90 @@ impl Fotoleine {
         return false;
       }
 
-      let jpgs:Vec<_> = dir_iter.unwrap()
+      self.image_entries = Some(dir_iter.unwrap()
         .filter_map(|entry_res| entry_res.ok())
-        .filter(|entry| Fotoleine::filter_entry(entry))
-        .collect();
+        .filter(|entry| Fotoleine::is_relevant_file(entry))
+        .collect());
 
-      println!("{:?}", jpgs);
-
-      let img_res = image::load(jpgs[0].path());
-
-      if let LoadResult::ImageU8(img) = img_res {
-        let Image {
-          width,
-          height,
-          data,
-          ..
-        } = img;
-
-        let raw_img = RawImage2d {
-          data: Cow::Owned(data),
-          width: width as u32,
-          height: height as u32,
-          format: ClientFormat::U8U8U8,
-        };
-        
-        let gl_texture_res = Texture2d::new(gl_ctx, raw_img);
-        if let Ok(gl_texture) = gl_texture_res {
-          let tex_id = textures.insert(Rc::new(gl_texture));
-          self.image = Some(tex_id);
-          self.image_size = [width as f32, height as f32];
-        }
-      }
+      self.image_idx = 0;
+      self.load_image(self.image_idx as usize, gl_ctx, textures);
 
       return true;
     } else {
       return false;
     }
   }
-}
 
-impl Program for Fotoleine {
-  fn on_event(&mut self, event:&Event<()>, framework:&mut Framework)->LoopSignal {
-
-    let loop_signal = match event {
-      Event::WindowEvent{event:win_event, .. } => {
-        match win_event {
-          WindowEvent::CloseRequested 
-            => LoopSignal::Exit,
-          WindowEvent::Resized { .. } | WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
-          WindowEvent::KeyboardInput { .. } | 
-          WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } |
-          WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } 
-            => LoopSignal::Redraw,
-          _ => LoopSignal::Wait
-        }
-      },
-      _ => LoopSignal::Wait
-    };
-
-    match event {
-      Event::WindowEvent{event:win_event, .. } => {
-        match win_event {
-          WindowEvent::DroppedFile(path) => {
-            self.set_path(path.clone().into_boxed_path(), framework.display.get_context(), framework.renderer.textures());
-          }
-          _ => {}
-        }
-      },
-      _ => {}
-    };
-
-    loop_signal
-  }
-
-  fn on_frame(&mut self, framework:&mut Framework)->LoopSignal {
-    let Framework {
-      ref display,
-      ref platform,
-      ref mut imgui,
-      ref mut renderer
-    } = framework;
-
-    let mut loop_signal = LoopSignal::Wait;
-
-    let mut ui = begin_frame(imgui, platform, display);
-
-    self.build_ui(&mut ui);
-
-    if ui.is_key_pressed(VirtualKeyCode::Q as _) && ui.io().key_super {
-      loop_signal = LoopSignal::Exit;
+    //:todo: see if gl_ctx and Textures can be somehow moved into the struct so they don't have to pollute the arguments of everything that ever does image loading
+  fn load_image<F: Facade>(&mut self, idx: usize, gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>) {
+    if self.image_entries.is_none() {
+      return;
     }
 
-    let draw_data = end_frame(ui, platform, display);
+    let path = self.image_entries.as_ref().unwrap()[idx].path();
+    let img_res = image::load(path);
 
-    let mut target = display.draw();
-    target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
-
-    renderer
-      .render(&mut target, draw_data)
-      .expect("Rendering failed");
-    target.finish().expect("Failed to swap buffers");
-
-    loop_signal
-  }
-}
-
-impl Fotoleine {
-  fn build_ui(&mut self, ui:&mut Ui) {
-    ui.window(im_str!("Hello world"))
-      .size([300.0, 100.0], Condition::FirstUseEver)
-      .build(|| {
-        ui.text(im_str!("Hello world!"));
-        ui.text(im_str!("こんにちは世界！"));
-        ui.text(im_str!("This...is...imgui-rs!"));
-        ui.separator();
-        // ui.input_text()
-        let mouse_pos = ui.io().mouse_pos;
-        ui.text(format!(
-          "Mouse Position: ({:.1},{:.1})",
-          mouse_pos[0], mouse_pos[1]
-        ));
+    if let LoadResult::ImageU8(img) = img_res {
+      let imgui_img_res = ImguiImage::from_data(img, gl_ctx, textures);
+      self.image = imgui_img_res.ok().map(|imgui_img| { // ok() converts Ok(img) to Some(img), and Err(...) to None. 
+        PlacedImage {
+          image: imgui_img,
+          pos: [0.0, 0.0],
+          scale: 0.25
+        }
       });
+    }
+  }
 
-    if let Some(tex_id) = self.image {
-      ui.image(tex_id, self.image_size)
-        .size([648.0, 432.0])
-        .build();
+  fn change_image<F: Facade>(&mut self, offset: i32, gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>) {
+    if self.image_entries.is_none() {
+      return;
+    }
+
+    let entries = self.image_entries.as_ref().unwrap();
+
+    self.image_idx += offset;
+    self.image_idx %= entries.len() as i32;
+    if self.image_idx < 0 {
+      self.image_idx += entries.len() as i32;
+    }
+
+    self.load_image(self.image_idx as usize, gl_ctx, textures);
+  }
+
+  fn build_ui(&mut self, ui:&mut Ui) {
+      //:todo: this is silly, I'm doing work to undo most of what imgui is doing for me
+      // better to do image drawing outside of imgui with glium directly, and draw imgui around that for what is needed
+    {
+      let _area_style_token = ui.push_style_vars(&[
+        StyleVar::WindowPadding([0.0, 0.0]), 
+        StyleVar::WindowRounding(0.0), 
+        StyleVar::WindowBorderSize(0.0)]);
+
+      ui.window(im_str!("ImgDisplay"))
+        .position([0.0, 0.0], Condition::Always)
+        .size(self.view_area_size, Condition::Always)
+        .flags(AREA_FLAGS)
+        .build(|| {
+          if let Some(ref placed_img) = self.image {
+            ui.set_cursor_pos(placed_img.pos);
+            ui.image(placed_img.image.id, placed_img.scaled_size())
+              .build();
+          }
+        });
     }
   }
 }
-
-
 
 fn main() {
-  let (event_loop, framework) = init("fotoleine");
+  let display_size = [1280, 720];
+  let (event_loop, framework) = init("fotoleine", display_size);
   let fotoleine = Fotoleine {
+    view_area_size: [display_size[0] as f32, display_size[1] as f32],
     root_path: None,
+    image_entries: None,
+    image_idx: 0,
     image: None,
-    image_size: [0.0, 0.0]
   };
 
   run(event_loop, framework, fotoleine);
