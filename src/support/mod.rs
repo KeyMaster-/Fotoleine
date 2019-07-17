@@ -12,11 +12,10 @@ use std::time::Instant;
 pub struct Framework {
   pub display: Display,
   pub platform: WinitPlatform,
-  pub imgui: Context,
   pub renderer: GliumRenderer,
 }
 
-pub fn init(title: &str, window_size: [i32; 2]) -> (EventLoop<()>, Framework) {
+pub fn init(title: &str, window_size: [i32; 2]) -> (EventLoop<()>, Context, Framework) {
   let event_loop = EventLoop::new();
   let context = ContextBuilder::new().with_vsync(true);
   let builder = WindowBuilder::new()
@@ -63,11 +62,10 @@ pub fn init(title: &str, window_size: [i32; 2]) -> (EventLoop<()>, Framework) {
   let framework = Framework {
     display,
     platform,
-    imgui,
     renderer
   };
 
-  (event_loop, framework)
+  (event_loop, imgui, framework)
 }
 
 pub fn begin_frame<'ui>(imgui:&'ui mut Context, platform:&WinitPlatform, display:&Display)->Ui<'ui> {
@@ -89,8 +87,10 @@ pub fn end_frame<'ui>(ui:Ui<'ui>, platform:&WinitPlatform, display:&Display)->&'
 }
 
 pub trait Program {
-  fn on_event(&mut self, event:&Event<()>, framework:&mut Framework)->LoopSignal;
-  fn on_frame(&mut self, framework:&mut Framework)->LoopSignal;
+  fn framework(&self)->&Framework;
+  fn framework_mut(&mut self)->&mut Framework;
+  fn on_event(&mut self, event: &Event<()>)->LoopSignal;
+  fn on_frame(&mut self, imgui: &mut Context)->LoopSignal;
 }
 
   // The ordering determines "strength", lower signals are stronger and override weaker (higher up) signals
@@ -102,24 +102,29 @@ pub enum LoopSignal {
   Exit
 }
 
-pub fn run<P:'static + Program>(event_loop:EventLoop<()>, mut framework: Framework, mut program: P) {
+pub fn run<P:'static + Program>(event_loop: EventLoop<()>, mut imgui: Context, mut program: P) {
   let mut last_frame = Instant::now();
   let mut first_redraw = false;
 
   event_loop.run(move |event, _, control_flow| {
+    {
+      let framework = program.framework_mut();
+      internal_handle_event(&mut imgui, &mut framework.platform, &framework.display, &event);
+    }
 
-    internal_handle_event(&mut framework.imgui, &mut framework.platform, &framework.display, &event);
-
-    let mut loop_signal = program.on_event(&event, &mut framework);
+    let mut loop_signal = program.on_event(&event);
     
     match event {
       Event::WindowEvent{event:win_event, .. } => {
         match win_event {
           WindowEvent::RedrawRequested => {
-            let io = framework.imgui.io_mut();
-            last_frame = io.update_delta_time(last_frame);
+            {
+              let io = imgui.io_mut();
+              last_frame = io.update_delta_time(last_frame);
+            }
+            
 
-            let frame_loop_signal = program.on_frame(&mut framework);
+            let frame_loop_signal = program.on_frame(&mut imgui);
             loop_signal = loop_signal.max(frame_loop_signal);
 
               // imgui doesn't react to some events on the same frame they arrive at, but rather one frame late
@@ -127,6 +132,7 @@ pub fn run<P:'static + Program>(event_loop:EventLoop<()>, mut framework: Framewo
               // So for every event that arrives, we actually do two redraws, to be sure those events take effect
               // Doing this through two requests is crucial for framerate, if we just did draw_ui twice here every frame would effectively be twice as long
             if first_redraw {
+              let framework = program.framework();
               first_redraw = false;
               let gl_window = framework.display.gl_window();
               let window = gl_window.window();
@@ -142,6 +148,7 @@ pub fn run<P:'static + Program>(event_loop:EventLoop<()>, mut framework: Framewo
     *control_flow = match loop_signal {
       LoopSignal::Wait => ControlFlow::Wait,
       LoopSignal::Redraw => {
+        let framework = program.framework();
         let gl_window = framework.display.gl_window();
         let window = gl_window.window();
         window.request_redraw();

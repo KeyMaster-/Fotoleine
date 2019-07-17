@@ -28,6 +28,7 @@ struct PlacedImage {
 }
 
 struct Fotoleine {
+  framework: Framework,
   view_area_size: [f32; 2],
   root_path: Option<Box<Path>>,
   image_entries: Option<Vec<DirEntry>>,
@@ -66,7 +67,15 @@ impl ImguiImage {
 const AREA_FLAGS:ImGuiWindowFlags = ImGuiWindowFlags::from_bits_truncate(ImGuiWindowFlags::NoTitleBar.bits() | ImGuiWindowFlags::NoResize.bits() | ImGuiWindowFlags::NoMove.bits() | ImGuiWindowFlags::NoScrollbar.bits() | ImGuiWindowFlags::NoScrollWithMouse.bits() | ImGuiWindowFlags::NoCollapse.bits());
 
 impl Program for Fotoleine {
-  fn on_event(&mut self, event:&Event<()>, framework:&mut Framework)->LoopSignal {
+  fn framework(&self)->&Framework {
+    return &self.framework;
+  }
+
+  fn framework_mut(&mut self)->&mut Framework {
+    return &mut self.framework;
+  }
+
+  fn on_event(&mut self, event:&Event<()>)->LoopSignal {
 
     let loop_signal = match event {
       Event::WindowEvent{event:win_event, .. } => {
@@ -88,7 +97,7 @@ impl Program for Fotoleine {
       Event::WindowEvent{event:win_event, .. } => {
         match win_event {
           WindowEvent::DroppedFile(path) => {
-            self.set_path(path.clone().into_boxed_path(), framework.display.get_context(), framework.renderer.textures());
+            self.set_path(path.clone().into_boxed_path());
             if let Some(ref mut placed_img) = self.image {
               placed_img.place_to_fit(self.view_area_size, 20.0);
             }
@@ -102,36 +111,29 @@ impl Program for Fotoleine {
     loop_signal
   }
 
-  fn on_frame(&mut self, framework:&mut Framework)->LoopSignal {
-    let Framework {
-      ref display,
-      ref platform,
-      ref mut imgui,
-      ref mut renderer
-    } = framework;
-
+  fn on_frame(&mut self, imgui: &mut Context)->LoopSignal {
     let mut loop_signal = LoopSignal::Wait;
 
-    let mut ui = begin_frame(imgui, platform, display);
+    let mut ui = begin_frame(imgui, &self.framework.platform, &self.framework.display);
 
     if ui.is_key_pressed(VirtualKeyCode::Q as _) && ui.io().key_super {
       loop_signal = LoopSignal::Exit;
     }
 
     if ui.is_key_pressed(VirtualKeyCode::A as _) {
-      self.change_image(-1, display.get_context(), renderer.textures());
+      self.change_image(-1);
     } else if ui.is_key_pressed(VirtualKeyCode::D as _) {
-      self.change_image( 1, display.get_context(), renderer.textures());
+      self.change_image( 1);
     }
 
     self.build_ui(&mut ui);
 
-    let draw_data = end_frame(ui, platform, display);
+    let draw_data = end_frame(ui, &self.framework.platform, &self.framework.display);
 
-    let mut target = display.draw();
+    let mut target = self.framework.display.draw();
     target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
 
-    renderer
+    self.framework.renderer
       .render(&mut target, draw_data)
       .expect("Rendering failed");
     target.finish().expect("Failed to swap buffers");
@@ -186,7 +188,7 @@ impl Fotoleine {
 
     // :todo: maybe make this return Result<(), Box<dyn Error>>
     // then all error handling can propagate outwards
-  fn set_path<F: Facade>(&mut self, path:Box<Path>, gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>)->bool {
+  fn set_path(&mut self, path:Box<Path>)->bool { //, gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>
     if path.is_dir() {
       self.root_path = Some(path);
 
@@ -201,7 +203,7 @@ impl Fotoleine {
         .collect());
 
       self.image_idx = 0;
-      self.load_image(self.image_idx as usize, gl_ctx, textures);
+      self.load_image(self.image_idx as usize);
 
       return true;
     } else {
@@ -210,7 +212,7 @@ impl Fotoleine {
   }
 
     //:todo: see if gl_ctx and Textures can be somehow moved into the struct so they don't have to pollute the arguments of everything that ever does image loading
-  fn load_image<F: Facade>(&mut self, idx: usize, gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>) {
+  fn load_image(&mut self, idx: usize) { // , gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>
     if self.image_entries.is_none() {
       return;
     }
@@ -219,6 +221,8 @@ impl Fotoleine {
     let img_res = image::load(path);
 
     if let LoadResult::ImageU8(img) = img_res {
+      let gl_ctx = self.framework.display.get_context();
+      let textures = self.framework.renderer.textures();
       let imgui_img_res = ImguiImage::from_data(img, gl_ctx, textures);
       self.image = imgui_img_res.ok().map(|imgui_img| { // ok() converts Ok(img) to Some(img), and Err(...) to None. 
         PlacedImage {
@@ -230,7 +234,7 @@ impl Fotoleine {
     }
   }
 
-  fn change_image<F: Facade>(&mut self, offset: i32, gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>) {
+  fn change_image(&mut self, offset: i32) {
     if self.image_entries.is_none() {
       return;
     }
@@ -243,7 +247,7 @@ impl Fotoleine {
       self.image_idx += entries.len() as i32;
     }
 
-    self.load_image(self.image_idx as usize, gl_ctx, textures);
+    self.load_image(self.image_idx as usize);
   }
 
   fn build_ui(&mut self, ui:&mut Ui) {
@@ -272,8 +276,9 @@ impl Fotoleine {
 
 fn main() {
   let display_size = [1280, 720];
-  let (event_loop, framework) = init("fotoleine", display_size);
+  let (event_loop, imgui, framework) = init("fotoleine", display_size);
   let fotoleine = Fotoleine {
+    framework: framework,
     view_area_size: [display_size[0] as f32, display_size[1] as f32],
     root_path: None,
     image_entries: None,
@@ -281,5 +286,5 @@ fn main() {
     image: None,
   };
 
-  run(event_loop, framework, fotoleine);
+  run(event_loop, imgui, fotoleine);
 }
