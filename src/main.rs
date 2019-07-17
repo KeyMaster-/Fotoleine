@@ -13,6 +13,7 @@ use glium::{
 use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
 use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
 use stb_image::image::{self, LoadResult, Image};
+use exif;
 
 mod support;
 
@@ -188,7 +189,7 @@ impl Fotoleine {
 
     // :todo: maybe make this return Result<(), Box<dyn Error>>
     // then all error handling can propagate outwards
-  fn set_path(&mut self, path:Box<Path>)->bool { //, gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>
+  fn set_path(&mut self, path:Box<Path>)->bool {
     if path.is_dir() {
       self.root_path = Some(path);
 
@@ -212,13 +213,13 @@ impl Fotoleine {
   }
 
     //:todo: see if gl_ctx and Textures can be somehow moved into the struct so they don't have to pollute the arguments of everything that ever does image loading
-  fn load_image(&mut self, idx: usize) { // , gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>
+  fn load_image(&mut self, idx: usize) {
     if self.image_entries.is_none() {
       return;
     }
 
     let path = self.image_entries.as_ref().unwrap()[idx].path();
-    let img_res = image::load(path);
+    let img_res = image::load(&path);
 
     if let LoadResult::ImageU8(img) = img_res {
       let gl_ctx = self.framework.display.get_context();
@@ -231,6 +232,15 @@ impl Fotoleine {
           scale: 0.25
         }
       });
+    }
+
+    {
+      let exif_reader_opt = std::fs::File::open(&path).ok()
+        .and_then(|file| exif::Reader::new(&mut std::io::BufReader::new(&file)).ok());
+        //.map(|exif_reader| {});
+      if let Some(exif_reader) = exif_reader_opt {
+        let _fields = exif_reader.fields();
+      }
     }
   }
 

@@ -12,3 +12,4 @@ imgui = { version = "0.1.0-pre-glutin", path = "deps/imgui-rs" }
 imgui-glium-renderer = { version = "0.1.0-pre-glutin", path = "deps/imgui-rs/imgui-glium-renderer" }
 imgui-winit-support = { version = "0.1.0-pre-glutin", path = "deps/imgui-rs/imgui-winit-support" }
 stb_image = "0.2"
+kamadak-exif = "0.3"
