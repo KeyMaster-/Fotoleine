@@ -1,14 +1,15 @@
 use std::error::Error;
 use std::borrow::Cow;
-use std::rc::Rc;
 use std::path::Path;
 use std::fs::{self, DirEntry};
 use imgui::*;
 use glium::{
   Surface,
   backend::Facade,
-  texture::{ClientFormat, RawImage2d},
-  Texture2d
+  texture::{ClientFormat, RawImage2d, srgb_texture2d::SrgbTexture2d},
+  VertexBuffer,
+  index::{NoIndices, PrimitiveType},
+  implement_vertex, uniform
 };
 use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
 use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
@@ -17,13 +18,13 @@ use exif;
 
 mod support;
 
-struct ImguiImage {
-  id: TextureId,
+struct ImageData {
+  texture: SrgbTexture2d,
   size: [usize; 2]
 }
 
 struct PlacedImage {
-  image: ImguiImage,
+  image: ImageData,
   pos: [f32; 2],
   scale: f32
 }
@@ -34,11 +35,16 @@ struct Fotoleine {
   root_path: Option<Box<Path>>,
   image_entries: Option<Vec<DirEntry>>,
   image_idx: i32,
-  image: Option<PlacedImage>
+  image: Option<PlacedImage>,
+
+  img_draw_program: glium::Program,
+  img_vert_buf: VertexBuffer<Vertex>,
+  img_idx_buf: NoIndices,
+  img_draw_matrix: [[f32; 4]; 4], 
 }
 
-impl ImguiImage {
-  fn from_data<F: Facade>(image:Image<u8>, gl_ctx:&F, textures: &mut Textures<Rc<Texture2d>>)->Result<ImguiImage, Box<dyn Error>> {
+impl ImageData {
+  fn from_stb_image<F: Facade>(image:Image<u8>, gl_ctx:&F)->Result<ImageData, Box<dyn Error>> {
     let Image {
       width,
       height,
@@ -55,17 +61,23 @@ impl ImguiImage {
 
     let size = [width, height];
     
-    let gl_texture = Texture2d::new(gl_ctx, raw_img)?;
-    let id = textures.insert(Rc::new(gl_texture));
+    let texture = SrgbTexture2d::new(gl_ctx, raw_img)?;
 
-    Ok(ImguiImage {
-      id,
+    Ok(ImageData {
+      texture,
       size
     })
   }
 }
 
-const AREA_FLAGS:ImGuiWindowFlags = ImGuiWindowFlags::from_bits_truncate(ImGuiWindowFlags::NoTitleBar.bits() | ImGuiWindowFlags::NoResize.bits() | ImGuiWindowFlags::NoMove.bits() | ImGuiWindowFlags::NoScrollbar.bits() | ImGuiWindowFlags::NoScrollWithMouse.bits() | ImGuiWindowFlags::NoCollapse.bits());
+// const AREA_FLAGS:ImGuiWindowFlags = ImGuiWindowFlags::from_bits_truncate(ImGuiWindowFlags::NoTitleBar.bits() | ImGuiWindowFlags::NoResize.bits() | ImGuiWindowFlags::NoMove.bits() | ImGuiWindowFlags::NoScrollbar.bits() | ImGuiWindowFlags::NoScrollWithMouse.bits() | ImGuiWindowFlags::NoCollapse.bits());
+
+#[derive(Copy, Clone, Debug)]
+struct Vertex {
+  pos: [f32; 2],
+  tex_coord: [f32; 2],
+}
+implement_vertex!(Vertex, pos, tex_coord);
 
 impl Program for Fotoleine {
   fn framework(&self)->&Framework {
@@ -134,6 +146,24 @@ impl Program for Fotoleine {
     let mut target = self.framework.display.draw();
     target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
 
+    if let Some(ref placed_img) = self.image {
+      let placed_corners = placed_img.placed_corners(); // ordered tl, tr, bl, br
+      let uvs = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]; 
+      let verts: Vec<_> = placed_corners.iter()
+        .zip(uvs.iter())
+        .map(|(&pos, &tex_coord)| Vertex{pos, tex_coord})
+        .collect();
+
+      self.img_vert_buf.write(&verts);
+
+      let uniforms = uniform! {
+        transform: self.img_draw_matrix,
+        img: &placed_img.image.texture
+      };
+
+      target.draw(&self.img_vert_buf, &self.img_idx_buf, &self.img_draw_program, &uniforms, &Default::default()).expect("Drawing image geometry failed.");
+    }
+
     self.framework.renderer
       .render(&mut target, draw_data)
       .expect("Rendering failed");
@@ -151,19 +181,83 @@ impl PlacedImage {
     return size;
   }
 
+  fn placed_corners(&self)->[[f32; 2]; 4] {
+    let scaled_size = self.scaled_size();
+    let tl = [self.pos[0] - scaled_size[0] / 2.0, self.pos[1] - scaled_size[1] / 2.0];
+    let tr = [self.pos[0] + scaled_size[0] / 2.0, self.pos[1] - scaled_size[1] / 2.0];
+    let bl = [self.pos[0] - scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0];
+    let br = [self.pos[0] + scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0];
+
+    return [tl, tr, bl, br];
+  }
+
     // sets scale to fit into a rectangle of `size`, and centers itself within that rectangle
   fn place_to_fit(&mut self, size:[f32; 2], padding:f32) {
     let x_scale = size[0] / ((self.image.size[0] as f32) + padding);
     let y_scale = size[1] / ((self.image.size[1] as f32) + padding);
     self.scale = x_scale.min(y_scale);
 
-    let scaled_size = self.scaled_size();
-    self.pos[0] = size[0] / 2.0 - scaled_size[0] / 2.0;
-    self.pos[1] = size[1] / 2.0 - scaled_size[1] / 2.0;
+    self.pos[0] = size[0] / 2.0;
+    self.pos[1] = size[1] / 2.0;
   }
 }
 
 impl Fotoleine {
+  fn init(framework: Framework, display_size:&[f32; 2])->Result<Fotoleine, Box<dyn Error>> {
+    let vertex_buffer = VertexBuffer::empty_dynamic(&framework.display, 4)?;
+    let index_buffer  = NoIndices(PrimitiveType::TriangleStrip);
+
+    let vertex_shader_src = r#"
+      #version 330
+
+      uniform mat4 transform;
+
+      in vec2 pos;
+      in vec2 tex_coord;
+      out vec2 f_tex_coord;
+
+      void main() {
+        f_tex_coord = tex_coord;
+        gl_Position = transform * vec4(pos, 0.0, 1.0);
+      }
+    "#;
+
+    let fragment_shader_src = r#"
+      #version 330
+
+      uniform sampler2D img;
+
+      in vec2 f_tex_coord;
+      out vec4 color;
+
+      void main() {
+        color = texture(img, f_tex_coord);
+      }
+    "#;
+
+    let gl_program = glium::Program::from_source(&framework.display, vertex_shader_src, fragment_shader_src, None)?;
+
+    let display_to_gl = 
+      [[ 2.0 / display_size[0], 0.0, 0.0, 0.0],
+       [ 0.0, -2.0 / display_size[1], 0.0, 0.0],
+       [ 0.0,  0.0, 1.0, 0.0],
+       [-1.0,  1.0, 0.0, 1.0f32]];
+
+    Ok(Fotoleine {
+      framework: framework,
+      view_area_size: [display_size[0], display_size[1]],
+      root_path: None,
+      image_entries: None,
+      image_idx: 0,
+      image: None,
+
+      img_draw_program: gl_program,
+      img_vert_buf: vertex_buffer,
+      img_idx_buf: index_buffer,
+      img_draw_matrix: display_to_gl
+    })
+  }
+
   fn is_relevant_file(entry:&DirEntry)->bool {
     let path = entry.path();
     if !path.is_file() {
@@ -223,13 +317,12 @@ impl Fotoleine {
 
     if let LoadResult::ImageU8(img) = img_res {
       let gl_ctx = self.framework.display.get_context();
-      let textures = self.framework.renderer.textures();
-      let imgui_img_res = ImguiImage::from_data(img, gl_ctx, textures);
-      self.image = imgui_img_res.ok().map(|imgui_img| { // ok() converts Ok(img) to Some(img), and Err(...) to None. 
+      let image_data_res = ImageData::from_stb_image(img, gl_ctx);
+      self.image = image_data_res.ok().map(|image_data| { // ok() converts Ok(img) to Some(img), and Err(...) to None. 
         PlacedImage {
-          image: imgui_img,
+          image: image_data,
           pos: [0.0, 0.0],
-          scale: 0.25
+          scale: 1.0
         }
       });
     }
@@ -272,43 +365,39 @@ impl Fotoleine {
     }
 
     self.load_image(self.image_idx as usize);
+    if let Some(ref mut placed_img) = self.image {
+      placed_img.place_to_fit(self.view_area_size, 20.0);
+    }
   }
 
   fn build_ui(&mut self, ui:&mut Ui) {
       //:todo: this is silly, I'm doing work to undo most of what imgui is doing for me
       // better to do image drawing outside of imgui with glium directly, and draw imgui around that for what is needed
-    {
-      let _area_style_token = ui.push_style_vars(&[
-        StyleVar::WindowPadding([0.0, 0.0]), 
-        StyleVar::WindowRounding(0.0), 
-        StyleVar::WindowBorderSize(0.0)]);
+    // {
+    //   let _area_style_token = ui.push_style_vars(&[
+    //     StyleVar::WindowPadding([0.0, 0.0]), 
+    //     StyleVar::WindowRounding(0.0), 
+    //     StyleVar::WindowBorderSize(0.0)]);
 
-      ui.window(im_str!("ImgDisplay"))
-        .position([0.0, 0.0], Condition::Always)
-        .size(self.view_area_size, Condition::Always)
-        .flags(AREA_FLAGS)
-        .build(|| {
-          if let Some(ref placed_img) = self.image {
-            ui.set_cursor_pos(placed_img.pos);
-            ui.image(placed_img.image.id, placed_img.scaled_size())
-              .build();
-          }
-        });
-    }
+    //   ui.window(im_str!("ImgDisplay"))
+    //     .position([0.0, 0.0], Condition::Always)
+    //     .size(self.view_area_size, Condition::Always)
+    //     .flags(AREA_FLAGS)
+    //     .build(|| {
+    //       if let Some(ref placed_img) = self.image {
+    //         ui.set_cursor_pos(placed_img.pos);
+    //         ui.image(placed_img.image.id, placed_img.scaled_size())
+    //           .build();
+    //       }
+    //     });
+    // }
   }
 }
 
 fn main() {
   let display_size = [1280, 720];
   let (event_loop, imgui, framework) = init("fotoleine", display_size);
-  let fotoleine = Fotoleine {
-    framework: framework,
-    view_area_size: [display_size[0] as f32, display_size[1] as f32],
-    root_path: None,
-    image_entries: None,
-    image_idx: 0,
-    image: None,
-  };
+  let fotoleine = Fotoleine::init(framework, &[display_size[0] as f32, display_size[1] as f32]).expect("Couldn't run Fotoleine init.");
 
   run(event_loop, imgui, fotoleine);
 }
