@@ -18,9 +18,19 @@ use exif;
 
 mod support;
 
+  // Rotation that should be applied when displaying an image
+  // to make it appear as it was taken.
+enum ImageRotation { 
+  None,
+  NinetyCW,
+  NinetyCCW,
+  OneEighty
+}
+
 struct ImageData {
   texture: SrgbTexture2d,
-  size: [usize; 2]
+  size: [usize; 2],
+  rotation: ImageRotation
 }
 
 struct PlacedImage {
@@ -44,7 +54,7 @@ struct Fotoleine {
 }
 
 impl ImageData {
-  fn from_stb_image<F: Facade>(image:Image<u8>, gl_ctx:&F)->Result<ImageData, Box<dyn Error>> {
+  fn from_components<F: Facade>(image: Image<u8>, exif_orientation: Option<&exif::Field>, gl_ctx: &F)->Result<ImageData, Box<dyn Error>> {
     let Image {
       width,
       height,
@@ -59,14 +69,39 @@ impl ImageData {
       format: ClientFormat::U8U8U8,
     };
 
-    let size = [width, height];
-    
     let texture = SrgbTexture2d::new(gl_ctx, raw_img)?;
+
+    let size = [width, height];
+
+    let rotation = exif_orientation.map_or(ImageRotation::None, |orientation_field| {
+      match orientation_field.value.get_uint(0) { // orientation is a vec of u16 values. Only one is expected, values 1 to 8, for different rotations and flips
+        Some(1) => ImageRotation::None,
+        Some(3) => ImageRotation::OneEighty,
+        Some(6) => ImageRotation::NinetyCW,
+        Some(8) => ImageRotation::NinetyCCW,
+        Some(id) => {
+          println!("Orientation {} is not supported.", id); // 2, 4, 5, 7
+          ImageRotation::None
+        },
+        None => {
+          println!("Unknown orientation value {:?}", exif_orientation);
+          ImageRotation::None
+        }
+      }
+    });
 
     Ok(ImageData {
       texture,
+      rotation,
       size
     })
+  }
+
+  fn rotated_size(&self)->[usize; 2] {
+    match self.rotation {
+      ImageRotation::None | ImageRotation::OneEighty => [self.size[0], self.size[1]],
+      ImageRotation::NinetyCW | ImageRotation::NinetyCCW => [self.size[1], self.size[0]]
+    }
   }
 }
 
@@ -147,12 +182,9 @@ impl Program for Fotoleine {
     target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
 
     if let Some(ref placed_img) = self.image {
-      let placed_corners = placed_img.placed_corners(); // ordered tl, tr, bl, br
-      let uvs = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]; 
-      let verts: Vec<_> = placed_corners.iter()
-        .zip(uvs.iter())
-        .map(|(&pos, &tex_coord)| Vertex{pos, tex_coord})
-        .collect();
+      let mut corner_data = placed_img.corner_data(); // ordered tl, tr, br, bl
+      corner_data.swap(2, 3); // make the order tl, tr, br, bl, as needed for the triangle strip
+      let verts: Vec<_> = corner_data.iter().map(|&(pos, tex_coord)| Vertex{pos, tex_coord}).collect();
 
       self.img_vert_buf.write(&verts);
 
@@ -175,26 +207,37 @@ impl Program for Fotoleine {
 
 impl PlacedImage {
   fn scaled_size(&self)->[f32; 2] {
-    let mut size = [self.image.size[0] as f32, self.image.size[1] as f32];
-    size[0] *= self.scale;
-    size[1] *= self.scale;
-    return size;
+    let rotated_size = self.image.rotated_size();
+    [(rotated_size[0] as f32) * self.scale, (rotated_size[1] as f32) * self.scale]
   }
 
-  fn placed_corners(&self)->[[f32; 2]; 4] {
+  fn corner_data(&self)->[([f32; 2], [f32; 2]); 4] { // order: tl, tr, br, bl
     let scaled_size = self.scaled_size();
-    let tl = [self.pos[0] - scaled_size[0] / 2.0, self.pos[1] - scaled_size[1] / 2.0];
-    let tr = [self.pos[0] + scaled_size[0] / 2.0, self.pos[1] - scaled_size[1] / 2.0];
-    let bl = [self.pos[0] - scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0];
-    let br = [self.pos[0] + scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0];
 
-    return [tl, tr, bl, br];
+    let pos = [[self.pos[0] - scaled_size[0] / 2.0, self.pos[1] - scaled_size[1] / 2.0],
+               [self.pos[0] + scaled_size[0] / 2.0, self.pos[1] - scaled_size[1] / 2.0],
+               [self.pos[0] + scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0],
+               [self.pos[0] - scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0]];
+
+    let rotation_steps = match self.image.rotation {
+      ImageRotation::None => 0,
+      ImageRotation::NinetyCW => 1,
+      ImageRotation::OneEighty => 2,
+      ImageRotation::NinetyCCW => 3
+    };
+
+    let mut uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    uv.rotate_right(rotation_steps);
+
+    [(pos[0], uv[0]), (pos[1], uv[1]), (pos[2], uv[2]), (pos[3], uv[3])]
   }
 
     // sets scale to fit into a rectangle of `size`, and centers itself within that rectangle
   fn place_to_fit(&mut self, size:[f32; 2], padding:f32) {
-    let x_scale = size[0] / ((self.image.size[0] as f32) + padding);
-    let y_scale = size[1] / ((self.image.size[1] as f32) + padding);
+    let rotated_size = self.image.rotated_size();
+
+    let x_scale = size[0] / ((rotated_size[0] as f32) + padding);
+    let y_scale = size[1] / ((rotated_size[1] as f32) + padding);
     self.scale = x_scale.min(y_scale);
 
     self.pos[0] = size[0] / 2.0;
@@ -315,9 +358,13 @@ impl Fotoleine {
     let path = self.image_entries.as_ref().unwrap()[idx].path();
     let img_res = image::load(&path);
 
-    if let LoadResult::ImageU8(img) = img_res {
+    let exif_reader_opt = std::fs::File::open(&path).ok()
+      .and_then(|file| exif::Reader::new(&mut std::io::BufReader::new(&file)).ok());
+
+    if let (LoadResult::ImageU8(img), Some(exif_reader)) = (img_res, exif_reader_opt) {
       let gl_ctx = self.framework.display.get_context();
-      let image_data_res = ImageData::from_stb_image(img, gl_ctx);
+      let image_data_res = ImageData::from_components(img, exif_reader.get_field(exif::Tag::Orientation, false), gl_ctx);
+
       self.image = image_data_res.ok().map(|image_data| { // ok() converts Ok(img) to Some(img), and Err(...) to None. 
         PlacedImage {
           image: image_data,
@@ -327,28 +374,40 @@ impl Fotoleine {
       });
     }
 
-    {
-      let exif_reader_opt = std::fs::File::open(&path).ok()
-        .and_then(|file| exif::Reader::new(&mut std::io::BufReader::new(&file)).ok());
-        //.map(|exif_reader| {});
-      if let Some(exif_reader) = exif_reader_opt {
-        // let _fields = exif_reader.fields();
-        exif_reader.get_field(exif::Tag::Orientation, false)
-          .map(|field| {
-            match field.value.get_uint(0) { // orientation is a vec of u16 values. Only one is expected, values 1 to 8, for different rotations and flips
-              Some(1) => println!("No rotation, no flips"),
-              Some(2) => println!("No rotation, x flip"),
-              Some(3) => println!("180 cw or flip along x and y"),
-              Some(4) => println!("No rotation, y flip"),
-              Some(5) => println!("90 ccw, y flip"),
-              Some(6) => println!("90 cw, no flips"),
-              Some(7) => println!("90 cw, y flip"),
-              Some(8) => println!("90 ccw"),
-              _ => println!("Unknown orientatino value {:?}", field.value)
-            }
-          });
-      }
-    }
+    // if let LoadResult::ImageU8(img) = img_res {
+    //   let gl_ctx = self.framework.display.get_context();
+    //   let image_data_res = ImageData::from_components(img, gl_ctx);
+    //   self.image = image_data_res.ok().map(|image_data| { // ok() converts Ok(img) to Some(img), and Err(...) to None. 
+    //     PlacedImage {
+    //       image: image_data,
+    //       pos: [0.0, 0.0],
+    //       scale: 1.0
+    //     }
+    //   });
+    // }
+
+    // {
+    //   let exif_reader_opt = std::fs::File::open(&path).ok()
+    //     .and_then(|file| exif::Reader::new(&mut std::io::BufReader::new(&file)).ok());
+    //     //.map(|exif_reader| {});
+    //   if let Some(exif_reader) = exif_reader_opt {
+    //     // let _fields = exif_reader.fields();
+    //     exif_reader.get_field(exif::Tag::Orientation, false)
+    //       .map(|field| {
+    //         match field.value.get_uint(0) { // orientation is a vec of u16 values. Only one is expected, values 1 to 8, for different rotations and flips
+    //           Some(1) => println!("No rotation, no flips"),
+    //           Some(2) => println!("No rotation, x flip"),
+    //           Some(3) => println!("180 cw or flip along x and y"),
+    //           Some(4) => println!("No rotation, y flip"),
+    //           Some(5) => println!("90 ccw, y flip"),
+    //           Some(6) => println!("90 cw, no flips"),
+    //           Some(7) => println!("90 cw, y flip"),
+    //           Some(8) => println!("90 ccw"),
+    //           _ => println!("Unknown orientatino value {:?}", field.value)
+    //         }
+    //       });
+    //   }
+    // }
   }
 
   fn change_image(&mut self, offset: i32) {
