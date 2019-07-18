@@ -239,7 +239,21 @@ impl Fotoleine {
         .and_then(|file| exif::Reader::new(&mut std::io::BufReader::new(&file)).ok());
         //.map(|exif_reader| {});
       if let Some(exif_reader) = exif_reader_opt {
-        let _fields = exif_reader.fields();
+        // let _fields = exif_reader.fields();
+        exif_reader.get_field(exif::Tag::Orientation, false)
+          .map(|field| {
+            match field.value.get_uint(0) { // orientation is a vec of u16 values. Only one is expected, values 1 to 8, for different rotations and flips
+              Some(1) => println!("No rotation, no flips"),
+              Some(2) => println!("No rotation, x flip"),
+              Some(3) => println!("180 cw or flip along x and y"),
+              Some(4) => println!("No rotation, y flip"),
+              Some(5) => println!("90 ccw, y flip"),
+              Some(6) => println!("90 cw, no flips"),
+              Some(7) => println!("90 cw, y flip"),
+              Some(8) => println!("90 ccw"),
+              _ => println!("Unknown orientatino value {:?}", field.value)
+            }
+          });
       }
     }
   }
