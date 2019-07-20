@@ -25,58 +25,6 @@ pub struct ImageData {
   pub rotation: ImageRotation
 }
 
-#[derive(Debug)]
-pub enum ImageLoadError {
-  FloatImage,
-  StbImageError(String),
-  IoError(io::Error),
-  TextureCreationError(texture::TextureCreationError),
-  ExifError(exif::Error)
-}
-
-impl fmt::Display for ImageLoadError {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>)->fmt::Result {
-    use self::ImageLoadError::*;
-    match self {
-      FloatImage => write!(f, "stb_image returned an F32 image, which is not handled currently."),
-      StbImageError(error) => write!(f, "stb_image load error: {}", error),
-      IoError(error) => write!(f, "File read error: {}", error),
-      TextureCreationError(error) => write!(f, "Could not create texture: {}", error),
-      ExifError(error) => write!(f, "Could not read exif data: {}", error),
-    }
-  }
-}
-
-impl Error for ImageLoadError {
-  fn source(&self)->Option<&(dyn Error + 'static)> {
-    use self::ImageLoadError::*;
-    match self {
-      IoError(error) => Some(error),
-      TextureCreationError(error) => Some(error),
-      ExifError(error) => Some(error),
-      _ => None
-    }
-  }
-}
-
-impl From<io::Error> for ImageLoadError {
-  fn from(error: io::Error)->Self {
-    ImageLoadError::IoError(error)
-  }
-}
-
-impl From<texture::TextureCreationError> for ImageLoadError {
-  fn from(error: texture::TextureCreationError)->Self {
-    ImageLoadError::TextureCreationError(error)
-  }
-}
-
-impl From<exif::Error> for ImageLoadError {
-  fn from(error: exif::Error)->Self {
-    ImageLoadError::ExifError(error)
-  }
-}
-
 impl ImageData {
   pub fn load<F: Facade>(path: &Path, gl_ctx: &F)->Result<ImageData, ImageLoadError> {
     let img_res = stb_image::image::load(&path);
@@ -146,14 +94,22 @@ impl ImageData {
 }
 
 pub struct PlacedImage {
-  pub image: ImageData,
+  pub image_data: ImageData,
   pub pos: [f32; 2],
   pub scale: f32
 }
 
 impl PlacedImage {
+  pub fn new(image_data: ImageData)->PlacedImage {
+    PlacedImage {
+      image_data: image_data,
+      pos: [0.0, 0.0],
+      scale: 1.0
+    }
+  }
+
   pub fn scaled_size(&self)->[f32; 2] {
-    let rotated_size = self.image.rotated_size();
+    let rotated_size = self.image_data.rotated_size();
     [(rotated_size[0] as f32) * self.scale, (rotated_size[1] as f32) * self.scale]
   }
 
@@ -165,7 +121,7 @@ impl PlacedImage {
                [self.pos[0] + scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0],
                [self.pos[0] - scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0]];
 
-    let rotation_steps = match self.image.rotation {
+    let rotation_steps = match self.image_data.rotation {
       ImageRotation::None => 0,
       ImageRotation::NinetyCW => 1,
       ImageRotation::OneEighty => 2,
@@ -180,7 +136,7 @@ impl PlacedImage {
 
     // sets scale to fit into a rectangle of `size`, and centers itself within that rectangle
   pub fn place_to_fit(&mut self, size:[f32; 2], padding:f32) {
-    let rotated_size = self.image.rotated_size();
+    let rotated_size = self.image_data.rotated_size();
 
     let x_scale = size[0] / ((rotated_size[0] as f32) + padding);
     let y_scale = size[1] / ((rotated_size[1] as f32) + padding);
@@ -188,5 +144,57 @@ impl PlacedImage {
 
     self.pos[0] = size[0] / 2.0;
     self.pos[1] = size[1] / 2.0;
+  }
+}
+
+#[derive(Debug)]
+pub enum ImageLoadError {
+  FloatImage,
+  StbImageError(String),
+  IoError(io::Error),
+  TextureCreationError(texture::TextureCreationError),
+  ExifError(exif::Error)
+}
+
+impl fmt::Display for ImageLoadError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>)->fmt::Result {
+    use self::ImageLoadError::*;
+    match self {
+      FloatImage => write!(f, "stb_image returned an F32 image, which is not handled currently."),
+      StbImageError(error) => write!(f, "stb_image load error: {}", error),
+      IoError(error) => write!(f, "File read error: {}", error),
+      TextureCreationError(error) => write!(f, "Could not create texture: {}", error),
+      ExifError(error) => write!(f, "Could not read exif data: {}", error),
+    }
+  }
+}
+
+impl Error for ImageLoadError {
+  fn source(&self)->Option<&(dyn Error + 'static)> {
+    use self::ImageLoadError::*;
+    match self {
+      IoError(error) => Some(error),
+      TextureCreationError(error) => Some(error),
+      ExifError(error) => Some(error),
+      _ => None
+    }
+  }
+}
+
+impl From<io::Error> for ImageLoadError {
+  fn from(error: io::Error)->Self {
+    ImageLoadError::IoError(error)
+  }
+}
+
+impl From<texture::TextureCreationError> for ImageLoadError {
+  fn from(error: texture::TextureCreationError)->Self {
+    ImageLoadError::TextureCreationError(error)
+  }
+}
+
+impl From<exif::Error> for ImageLoadError {
+  fn from(error: exif::Error)->Self {
+    ImageLoadError::ExifError(error)
   }
 }

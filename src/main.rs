@@ -1,174 +1,26 @@
 use std::error::Error;
-use std::io;
 use std::path::Path;
-use std::fs::{self, DirEntry};
 use std::process::Command;
-use std::fmt;
 use imgui::*;
 use glium::{
   Surface,
   backend::Facade,
-  VertexBuffer,
-  index::{NoIndices, PrimitiveType},
-  implement_vertex, uniform
 };
 use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
 use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
-use image::{ImageData, PlacedImage};
-
+use loaded_dir::LoadedDir;
+use image_display::ImageDisplay;
 
 mod support;
 mod image;
-
-  // :todo: consider using snafu, io error has specific context of being during entry reading
-  // issue is easy From trait implementations for use in ImageData::load
-#[derive(Debug)]
-enum DirLoadError {
-  NotADirectory,
-  IoError(io::Error),
-  ImageLoadError(image::ImageLoadError)
-}
-
-impl fmt::Display for DirLoadError {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>)->fmt::Result {
-    use self::DirLoadError::*;
-    match self {
-      NotADirectory => write!(f, "Given path is not a directory"),
-      IoError(error) => write!(f, "Could not read directory entries: {}", error),
-      ImageLoadError(error) => write!(f, "Could not load initial image: {}", error),
-    }
-  }
-}
-
-impl Error for DirLoadError {
-  fn source(&self)->Option<&(dyn Error + 'static)> {
-    use self::DirLoadError::*;
-    match self {
-      NotADirectory => None,
-      IoError(error) => Some(error),
-      ImageLoadError(error) => Some(error)
-    }
-  }
-}
-
-impl From<io::Error> for DirLoadError {
-  fn from(error: io::Error)->Self {
-    DirLoadError::IoError(error)
-  }
-}
-
-impl From<image::ImageLoadError> for DirLoadError {
-  fn from(error: image::ImageLoadError)->Self {
-    DirLoadError::ImageLoadError(error)
-  }
-}
-
-  // A loaded directory of images we want to display
-struct LoadedDir {
-  path: Box<Path>,
-  entries: Vec<DirEntry>,
-  shown_idx: usize,
-  shown_image: PlacedImage
-}
-
-impl LoadedDir {
-  fn new<F: Facade>(path: &Path, gl_ctx: &F)->Result<LoadedDir, DirLoadError> {
-    if !path.is_dir() {
-      return Err(DirLoadError::NotADirectory);
-    }
-
-    let path = path.to_path_buf().into_boxed_path();
-    let dir_iter = fs::read_dir(&path)?;
-
-    let entries: Vec<_> = dir_iter
-      .filter_map(|entry_res| entry_res.ok())
-      .filter(|entry| is_relevant_file(entry))
-      .collect();
-
-    let shown_idx = 0;
-    let img_path = entries[shown_idx].path();
-    let image_data = ImageData::load(&img_path, gl_ctx)?;
-
-    let shown_image = PlacedImage {
-      image: image_data,
-      pos: [0.0, 0.0],
-      scale: 1.0
-    };
-
-    Ok(LoadedDir {
-      path,
-      entries,
-      shown_idx,
-      shown_image
-    })
-  }
-
-  fn change_image<F: Facade>(&mut self, offset: i32, gl_ctx: &F)->Result<(), image::ImageLoadError> {
-    let mut signed_idx = self.shown_idx as i32;
-    let entries_len = self.entries.len() as i32;
-
-      // wrapping offset
-    signed_idx += offset;
-    while signed_idx < 0 {
-      signed_idx += entries_len;
-    }
-    while signed_idx >= entries_len {
-      signed_idx -= entries_len;
-    }
-    let usize_idx = signed_idx as usize;
-    let img_path = self.entries[usize_idx].path();
-
-    let image_data = ImageData::load(&img_path, gl_ctx)?;
-    self.shown_image = PlacedImage {
-      image: image_data,
-      pos: [0.0, 0.0],
-      scale: 1.0
-    };
-    self.shown_idx = usize_idx; // only assign new index once loading the new data succeeded
-
-    Ok(())
-  }
-}
-
-fn is_relevant_file(entry:&DirEntry)->bool {
-  let path = entry.path();
-  if !path.is_file() {
-    return false;
-  }
-
-  let ext_str = path.extension().and_then(|ext| ext.to_str());
-
-  if ext_str.is_none() { // no extension, or no unicode extension
-    return false;
-  }
-  let ext_lowercase = ext_str.unwrap().to_lowercase();
-  let ext_matches = ext_lowercase == "jpg" || ext_lowercase == "jpeg";
-
-  let stem_str = path.file_stem().and_then(|stem| stem.to_str());
-  if stem_str.is_none() { // no stem, or no unicode stem
-    return false;
-  }
-  let stem_okay = !stem_str.unwrap().starts_with("._");
-
-  ext_matches && stem_okay
-}
-
-#[derive(Copy, Clone, Debug)]
-struct Vertex {
-  pos: [f32; 2],
-  tex_coord: [f32; 2],
-}
-implement_vertex!(Vertex, pos, tex_coord);
+mod loaded_dir;
+mod image_display;
 
 struct Fotoleine {
   framework: Framework,
   view_area_size: [f32; 2],
   loaded_dir: Option<LoadedDir>,
-
-  img_draw_program: glium::Program,
-  img_vert_buf: VertexBuffer<Vertex>,
-  img_idx_buf: NoIndices,
-  img_draw_matrix: [[f32; 4]; 4], 
+  image_display: ImageDisplay,
 }
 
 impl Program for Fotoleine {
@@ -181,7 +33,6 @@ impl Program for Fotoleine {
   }
 
   fn on_event(&mut self, event:&Event<()>)->LoopSignal {
-
     let loop_signal = match event {
       Event::WindowEvent{event:win_event, .. } => {
         match win_event {
@@ -267,18 +118,19 @@ impl Program for Fotoleine {
     target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
 
     if let Some(ref loaded_dir) = self.loaded_dir {
-      let mut corner_data = loaded_dir.shown_image.corner_data(); // ordered tl, tr, br, bl
-      corner_data.swap(2, 3); // make the order tl, tr, br, bl, as needed for the triangle strip
-      let verts: Vec<_> = corner_data.iter().map(|&(pos, tex_coord)| Vertex{pos, tex_coord}).collect();
+      self.image_display.draw_image(&loaded_dir.shown_image, &mut target);
+      // let mut corner_data = loaded_dir.shown_image.corner_data(); // ordered tl, tr, br, bl
+      // corner_data.swap(2, 3); // make the order tl, tr, br, bl, as needed for the triangle strip
+      // let verts: Vec<_> = corner_data.iter().map(|&(pos, tex_coord)| Vertex{pos, tex_coord}).collect();
 
-      self.img_vert_buf.write(&verts);
+      // self.img_vert_buf.write(&verts);
 
-      let uniforms = uniform! {
-        transform: self.img_draw_matrix,
-        img: &loaded_dir.shown_image.image.texture
-      };
+      // let uniforms = uniform! {
+      //   transform: self.img_draw_matrix,
+      //   img: &loaded_dir.shown_image.image.texture
+      // };
 
-      target.draw(&self.img_vert_buf, &self.img_idx_buf, &self.img_draw_program, &uniforms, &Default::default()).expect("Drawing image geometry failed.");
+      // target.draw(&self.img_vert_buf, &self.img_idx_buf, &self.img_draw_program, &uniforms, &Default::default()).expect("Drawing image geometry failed.");
     }
 
     self.framework.renderer
@@ -292,54 +144,13 @@ impl Program for Fotoleine {
 
 impl Fotoleine {
   fn init(framework: Framework, display_size:&[f32; 2])->Result<Fotoleine, Box<dyn Error>> {
-    let vertex_buffer = VertexBuffer::empty_dynamic(&framework.display, 4)?;
-    let index_buffer  = NoIndices(PrimitiveType::TriangleStrip);
-
-    let vertex_shader_src = r#"
-      #version 330
-
-      uniform mat4 transform;
-
-      in vec2 pos;
-      in vec2 tex_coord;
-      out vec2 f_tex_coord;
-
-      void main() {
-        f_tex_coord = tex_coord;
-        gl_Position = transform * vec4(pos, 0.0, 1.0);
-      }
-    "#;
-
-    let fragment_shader_src = r#"
-      #version 330
-
-      uniform sampler2D img;
-
-      in vec2 f_tex_coord;
-      out vec4 color;
-
-      void main() {
-        color = texture(img, f_tex_coord);
-      }
-    "#;
-
-    let gl_program = glium::Program::from_source(&framework.display, vertex_shader_src, fragment_shader_src, None)?;
-
-    let display_to_gl = 
-      [[ 2.0 / display_size[0], 0.0, 0.0, 0.0],
-       [ 0.0, -2.0 / display_size[1], 0.0, 0.0],
-       [ 0.0,  0.0, 1.0, 0.0],
-       [-1.0,  1.0, 0.0, 1.0f32]];
+    let image_display = ImageDisplay::new(&framework.display, &display_size)?;
 
     Ok(Fotoleine {
       framework: framework,
       view_area_size: [display_size[0], display_size[1]],
       loaded_dir: None,
-
-      img_draw_program: gl_program,
-      img_vert_buf: vertex_buffer,
-      img_idx_buf: index_buffer,
-      img_draw_matrix: display_to_gl
+      image_display: image_display
     })
   }
 
