@@ -44,7 +44,7 @@ pub fn init(title: &str, window_size: [i32; 2]) -> (EventLoop<()>, Context, Fram
       }),
     },
     FontSource::TtfData {
-      data: include_bytes!("../../resources/mplus-1p-regular.ttf"),
+      data: include_bytes!("../resources/mplus-1p-regular.ttf"),
       size_pixels: font_size,
       config: Some(FontConfig {
         rasterizer_multiply: 1.75,
