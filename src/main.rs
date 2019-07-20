@@ -2,6 +2,7 @@ use std::error::Error;
 use std::borrow::Cow;
 use std::path::Path;
 use std::fs::{self, DirEntry};
+use std::process::Command;
 use imgui::*;
 use glium::{
   Surface,
@@ -172,6 +173,21 @@ impl Program for Fotoleine {
       self.change_image(-1);
     } else if ui.is_key_pressed(VirtualKeyCode::D as _) {
       self.change_image( 1);
+    }
+
+    if ui.is_key_pressed(VirtualKeyCode::O as _) {
+      if let Some(entries) = &self.image_entries {
+        let mut path = entries[self.image_idx as usize].path();
+        path.set_extension("cr2");
+
+        let open_res = Command::new("open")
+          .arg(path.as_os_str())
+          .output();
+
+        if let Err(err) = open_res {
+          println!("Couldn't open file {}, error {}", path.to_string_lossy(), err);
+        }
+      }
     }
 
     self.build_ui(&mut ui);
