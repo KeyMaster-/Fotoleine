@@ -6,24 +6,53 @@ use glium::{
   Surface,
   backend::Facade,
 };
+use glium::glutin::event_loop::{EventLoop, EventLoopProxy, EventLoopClosed};
 use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
 use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
 use loaded_dir::LoadedDir;
 use image_display::ImageDisplay;
+use worker_pool::{WorkerPool, Worker};
+use std::sync::mpsc::Sender;
 
 mod support;
 mod image;
 mod loaded_dir;
 mod image_display;
+mod worker_pool;
+
+struct LoadWorker {
+  id: usize,
+  event_loop_proxy: EventLoopProxy<<Fotoleine as Program>::UserEvent>,
+}
+
+impl Worker for LoadWorker {
+  type Input = String;
+  type Output = usize;
+
+  fn execute(&mut self, input: Self::Input, output: Sender<Self::Output>) {
+    match output.send(input.len()) {
+      Ok(_) => println!("Worker {}: channel send succeeded", self.id),
+      Err(error) => println!("Worker {}: channel send failed, {}", self.id, error)
+    };
+
+    match self.event_loop_proxy.send_event(self.id) {
+      Ok(()) => println!("Worker {}: Send succeeded", self.id),
+      Err(EventLoopClosed) => println!("Worker {}: Event loop closed", self.id)
+    };
+  }
+}
 
 struct Fotoleine {
   framework: Framework,
   view_area_size: [f32; 2],
   loaded_dir: Option<LoadedDir>,
   image_display: ImageDisplay,
+  worker_pool: WorkerPool<LoadWorker>
 }
 
 impl Program for Fotoleine {
+  type UserEvent = usize;
+
   fn framework(&self)->&Framework {
     return &self.framework;
   }
@@ -32,7 +61,7 @@ impl Program for Fotoleine {
     return &mut self.framework;
   }
 
-  fn on_event(&mut self, event:&Event<()>)->LoopSignal {
+  fn on_event(&mut self, event:&Event<Self::UserEvent>)->LoopSignal {
     let loop_signal = match event {
       Event::WindowEvent{event:win_event, .. } => {
         match win_event {
@@ -45,6 +74,10 @@ impl Program for Fotoleine {
             => LoopSignal::Redraw,
           _ => LoopSignal::Wait
         }
+      },
+      Event::UserEvent(num) => {
+        println!("User event received, value {}", num);
+        LoopSignal::Wait
       },
       _ => LoopSignal::Wait
     };
@@ -119,18 +152,6 @@ impl Program for Fotoleine {
 
     if let Some(ref loaded_dir) = self.loaded_dir {
       self.image_display.draw_image(&loaded_dir.shown_image, &mut target);
-      // let mut corner_data = loaded_dir.shown_image.corner_data(); // ordered tl, tr, br, bl
-      // corner_data.swap(2, 3); // make the order tl, tr, br, bl, as needed for the triangle strip
-      // let verts: Vec<_> = corner_data.iter().map(|&(pos, tex_coord)| Vertex{pos, tex_coord}).collect();
-
-      // self.img_vert_buf.write(&verts);
-
-      // let uniforms = uniform! {
-      //   transform: self.img_draw_matrix,
-      //   img: &loaded_dir.shown_image.image.texture
-      // };
-
-      // target.draw(&self.img_vert_buf, &self.img_idx_buf, &self.img_draw_program, &uniforms, &Default::default()).expect("Drawing image geometry failed.");
     }
 
     self.framework.renderer
@@ -140,17 +161,47 @@ impl Program for Fotoleine {
 
     loop_signal
   }
+
+  fn on_shutdown(&mut self) {
+    // if let Some(thread_handle) = self.thread_handle.take() {
+    //   thread_handle.join().expect("Couldn't join on other thread");
+    // }
+    println!("Shutting down");
+  }
 }
 
 impl Fotoleine {
-  fn init(framework: Framework, display_size:&[f32; 2])->Result<Fotoleine, Box<dyn Error>> {
+  fn init(framework: Framework, display_size:&[f32; 2], event_loop: &EventLoop<<Self as Program>::UserEvent>)->Result<Fotoleine, Box<dyn Error>> {
     let image_display = ImageDisplay::new(&framework.display, &display_size)?;
+    let worker_pool = WorkerPool::new(4, |id| {
+      LoadWorker {
+        id: id,
+        event_loop_proxy: event_loop.create_proxy()
+      }
+    }, String::from("hello"));
+
+    for output in worker_pool.output.iter() {
+      println!("{:?}", output);
+    };
+
+    // let join_handle = thread::spawn(move || {
+    //   for i in 0..10 {
+    //     println!("From thread: {}", i);
+    //     match event_loop_proxy.send_event(i) {
+    //       Ok(()) => println!("Send succeeded"),
+    //       Err(EventLoopClosed) => println!("Event loop closed")
+    //     };
+    //     thread::sleep(Duration::from_millis(1000))
+    //   }
+    // });
+
 
     Ok(Fotoleine {
       framework: framework,
       view_area_size: [display_size[0], display_size[1]],
       loaded_dir: None,
-      image_display: image_display
+      image_display: image_display,
+      worker_pool: worker_pool
     })
   }
 
@@ -166,7 +217,7 @@ impl Fotoleine {
 fn main() {
   let display_size = [1280, 720];
   let (event_loop, imgui, framework) = init("fotoleine", display_size);
-  let fotoleine = Fotoleine::init(framework, &[display_size[0] as f32, display_size[1] as f32]).expect("Couldn't run Fotoleine init.");
+  let fotoleine = Fotoleine::init(framework, &[display_size[0] as f32, display_size[1] as f32], &event_loop).expect("Couldn't initialize Fotoleine.");
 
   run(event_loop, imgui, fotoleine);
 }

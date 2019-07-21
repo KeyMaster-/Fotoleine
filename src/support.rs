@@ -15,8 +15,8 @@ pub struct Framework {
   pub renderer: GliumRenderer,
 }
 
-pub fn init(title: &str, window_size: [i32; 2]) -> (EventLoop<()>, Context, Framework) {
-  let event_loop = EventLoop::new();
+pub fn init<T>(title: &str, window_size: [i32; 2]) -> (EventLoop<T>, Context, Framework) {
+  let event_loop = EventLoop::<T>::new_user_event();
   let context = ContextBuilder::new().with_vsync(true);
   let builder = WindowBuilder::new()
     .with_title(title.to_owned())
@@ -87,10 +87,13 @@ pub fn end_frame<'ui>(ui:Ui<'ui>, platform:&WinitPlatform, display:&Display)->&'
 }
 
 pub trait Program {
+  type UserEvent;
+
   fn framework(&self)->&Framework;
   fn framework_mut(&mut self)->&mut Framework;
-  fn on_event(&mut self, event: &Event<()>)->LoopSignal;
+  fn on_event(&mut self, event: &Event<Self::UserEvent>)->LoopSignal;
   fn on_frame(&mut self, imgui: &mut Context)->LoopSignal;
+  fn on_shutdown(&mut self);
 }
 
   // The ordering determines "strength", lower signals are stronger and override weaker (higher up) signals
@@ -102,7 +105,7 @@ pub enum LoopSignal {
   Exit
 }
 
-pub fn run<P:'static + Program>(event_loop: EventLoop<()>, mut imgui: Context, mut program: P) {
+pub fn run<P:'static + Program>(event_loop: EventLoop<P::UserEvent>, mut imgui: Context, mut program: P)->! {
   let mut last_frame = Instant::now();
   let mut first_redraw = false;
 
@@ -142,6 +145,9 @@ pub fn run<P:'static + Program>(event_loop: EventLoop<()>, mut imgui: Context, m
           _ => {}
         }
       },
+      Event::LoopDestroyed => {
+        program.on_shutdown();
+      }
       _ => {}
     };
 
@@ -160,7 +166,7 @@ pub fn run<P:'static + Program>(event_loop: EventLoop<()>, mut imgui: Context, m
   });
 }
 
-fn internal_handle_event(imgui:&mut Context, platform:&mut WinitPlatform, display:&Display, event:&Event<()>) {
+fn internal_handle_event<T>(imgui:&mut Context, platform:&mut WinitPlatform, display:&Display, event:&Event<T>) {
   let gl_window = display.gl_window();
   let window = gl_window.window();
   platform.handle_event(imgui.io_mut(), window, event);
