@@ -126,7 +126,6 @@ pub fn run<P:'static + Program>(event_loop: EventLoop<P::UserEvent>, mut imgui: 
               last_frame = io.update_delta_time(last_frame);
             }
             
-
             let frame_loop_signal = program.on_frame(&mut imgui);
             loop_signal = loop_signal.max(frame_loop_signal);
 

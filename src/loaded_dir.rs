@@ -1,21 +1,40 @@
 use std::error::Error;
 use std::io;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::fs::{self, DirEntry};
 use glium::backend::Facade;
-use crate::image::{self, ImageData, PlacedImage};
+use glium::texture::TextureCreationError;
+use crate::image::{self, ImageData, ImageTexture, PlacedImage};
+use crate::LoaderPool;
 
   // A loaded directory of images we want to display
 pub struct LoadedDir {
-  pub path: Box<Path>,
-  pub entries: Vec<DirEntry>,
-  pub shown_idx: usize,
-  pub shown_image: PlacedImage
+  path: Box<Path>,
+  entries: Vec<DirEntry>,
+  loaded_images: Vec<Option<PlacedImage>>,
+  shown_idx: usize,
+}
+
+fn offset_idx(idx: usize, max: usize, offset: i32)->usize {
+  let mut signed_idx = idx as i32;
+  let max = max as i32;
+
+  signed_idx += offset;
+  while signed_idx < 0 {
+    signed_idx += max;
+  }
+  while signed_idx >= max {
+    signed_idx -= max;
+  }
+  signed_idx as usize
 }
 
 impl LoadedDir {
-  pub fn new<F: Facade>(path: &Path, gl_ctx: &F)->Result<LoadedDir, DirLoadError> {
+    // with background loading, this doesn't need to be so strict on loading the first shown image
+    // instead, we need a way to set the intended shown image, and pass the worker pool along as we go
+    // also, when output arrives, we need to call something on this to pass in the result data, then with gl_ctx
+  pub fn new(path: &Path)->Result<LoadedDir, DirLoadError> {
     if !path.is_dir() {
       return Err(DirLoadError::NotADirectory);
     }
@@ -28,38 +47,72 @@ impl LoadedDir {
       .filter(|entry| is_relevant_file(entry))
       .collect();
 
-    let shown_idx = 0;
-    let img_path = entries[shown_idx].path();
-    let image_data = ImageData::load(&img_path, gl_ctx)?;
+    let mut loaded_images = Vec::with_capacity(entries.len());
+    loaded_images.resize_with(entries.len(), Default::default);
 
-    let shown_image = PlacedImage::new(image_data);
+    let shown_idx = 0;
 
     Ok(LoadedDir {
       path,
       entries,
+      loaded_images,
       shown_idx,
-      shown_image
     })
   }
 
-  pub fn change_image<F: Facade>(&mut self, offset: i32, gl_ctx: &F)->Result<(), image::ImageLoadError> {
-    let mut signed_idx = self.shown_idx as i32;
-    let entries_len = self.entries.len() as i32;
+  pub fn shown_idx(&self)->usize {
+    self.shown_idx
+  }
 
-      // wrapping offset
-    signed_idx += offset;
-    while signed_idx < 0 {
-      signed_idx += entries_len;
-    }
-    while signed_idx >= entries_len {
-      signed_idx -= entries_len;
-    }
-    let usize_idx = signed_idx as usize;
-    let img_path = self.entries[usize_idx].path();
+  pub fn offset_idx(&self, offset: i32)->usize {
+    offset_idx(self.shown_idx, self.entries.len(), offset)
+  }
 
-    let image_data = ImageData::load(&img_path, gl_ctx)?;
-    self.shown_image = PlacedImage::new(image_data);
-    self.shown_idx = usize_idx; // only assign new index once loading the new data succeeded
+  pub fn image_at(&self, idx: usize)->&Option<PlacedImage> {
+    &self.loaded_images[idx]
+  }
+
+  pub fn image_at_mut(&mut self, idx: usize)->&mut Option<PlacedImage> {
+    &mut self.loaded_images[idx]
+  }
+
+  pub fn path_at(&self, idx: usize)->PathBuf {
+    self.entries[idx].path()
+  }
+
+  pub fn set_shown(&mut self, idx: usize, loader_pool: &LoaderPool) {
+    self.shown_idx = idx;
+    if self.loaded_images[idx].is_none() {
+      self.submit_load_request(idx, &loader_pool);
+    }
+
+    let prev_idx = offset_idx(self.shown_idx, self.entries.len(), -1);
+    if self.loaded_images[prev_idx].is_none() {
+      self.submit_load_request(prev_idx, &loader_pool);
+    }
+
+    let next_idx = offset_idx(self.shown_idx, self.entries.len(), 1);
+    if self.loaded_images[next_idx].is_none() {
+      self.submit_load_request(next_idx, &loader_pool);
+    }
+  }
+
+  fn submit_load_request(&self, idx: usize, loader_pool: &LoaderPool) {
+    let path = self.entries[idx].path();
+    loader_pool.submit((path, idx));
+  }
+
+    //:todo: trace why the backing image data is being kept around, either fix that or unload everything before the last n loads
+  pub fn process_loaded_image<F: Facade>(&mut self, load_output: (ImageData, usize), gl_ctx: &F)->Result<(), TextureCreationError> {
+    let (image_data, idx) = load_output;
+    let texture = ImageTexture::from_data(image_data, gl_ctx)?;
+    let placed_image = PlacedImage::new(texture);
+
+    if self.loaded_images[idx].is_none() {
+      self.loaded_images[idx] = Some(placed_image);
+    } else {
+      println!("Image {} was already loaded!", idx);
+    };
 
     Ok(())
   }

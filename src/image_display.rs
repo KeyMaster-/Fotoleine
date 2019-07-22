@@ -79,7 +79,7 @@ impl ImageDisplay {
 
     let uniforms = uniform! {
       transform: self.view_matrix,
-      img: &placed_image.image_data.texture
+      img: &placed_image.image.texture
     };
 
     target.draw(&self.vert_buf, &self.idx_buf, &self.program, &uniforms, &Default::default()).expect("Drawing image geometry failed.");
