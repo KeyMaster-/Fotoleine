@@ -31,9 +31,6 @@ fn offset_idx(idx: usize, max: usize, offset: i32)->usize {
 }
 
 impl LoadedDir {
-    // with background loading, this doesn't need to be so strict on loading the first shown image
-    // instead, we need a way to set the intended shown image, and pass the worker pool along as we go
-    // also, when output arrives, we need to call something on this to pass in the result data, then with gl_ctx
   pub fn new(path: &Path)->Result<LoadedDir, DirLoadError> {
     if !path.is_dir() {
       return Err(DirLoadError::NotADirectory);
@@ -102,7 +99,6 @@ impl LoadedDir {
     loader_pool.submit((path, idx));
   }
 
-    //:todo: trace why the backing image data is being kept around, either fix that or unload everything before the last n loads
   pub fn process_loaded_image<F: Facade>(&mut self, load_output: (ImageData, usize), gl_ctx: &F)->Result<(), TextureCreationError> {
     let (image_data, idx) = load_output;
     let texture = ImageTexture::from_data(image_data, gl_ctx)?;

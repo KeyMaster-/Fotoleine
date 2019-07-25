@@ -1,11 +1,10 @@
 use std::error::Error;
 use std::fmt;
 use std::io;
-use std::borrow::Cow;
 use std::path::Path;
 use glium::{
   backend::Facade,
-  texture::{ClientFormat, RawImage2d, srgb_texture2d::SrgbTexture2d, TextureCreationError}
+  texture::{RawImage2d, CompressedSrgbTexture2d, TextureCreationError}
 };
 use stb_image::image::{Image, LoadResult};
 use exif;
@@ -19,15 +18,6 @@ pub enum ImageRotation {
   OneEighty
 }
 
-  // raw image components
-  // :next: move load functionality to this struct
-  // then ImageTexture can just be created from components
-  // (the orientation processing in from_components has to be moved over, since ImageRotation is easier to send)
-  // the implement actual load worker functionality
-  // then the loader worker sends over a user event that signals either "load successful, image is waiting in channel", or "load failed"
-  // on load failed, ui can signal as such if it wants to
-  // on load succeed, it'll to the recv
-  // then in loaded_dir, we get to request new loads whenever shown 
 pub struct ImageData {
   image: Image<u8>,
   rotation: ImageRotation
@@ -71,7 +61,7 @@ impl ImageData {
 }
 
 pub struct ImageTexture {
-  pub texture: SrgbTexture2d,
+  pub texture: CompressedSrgbTexture2d,
   pub size: [usize; 2],
   pub rotation: ImageRotation
 }
@@ -90,15 +80,8 @@ impl ImageTexture {
       ..
     } = image;
 
-    let raw_img = RawImage2d {
-      data: Cow::Owned(data),
-      width: width as u32,
-      height: height as u32,
-      format: ClientFormat::U8U8U8,
-    };
-
-    let texture = SrgbTexture2d::new(gl_ctx, raw_img)?;
-
+    let raw_img = RawImage2d::from_raw_rgb(data, (width as u32, height as u32));
+    let texture = CompressedSrgbTexture2d::new(gl_ctx, raw_img)?;
     let size = [width, height];
 
     Ok(ImageTexture {
