@@ -101,29 +101,6 @@ impl Program for Fotoleine {
                 // it's fine to discard the image in that case though
               println!("Received load result, but loaded_dir does not exist!");
             }
-            // let load_output_res = self.loader_pool.output.recv();
-            // if let Ok(load_output) = load_output_res {
-
-            //   if let Some(ref mut loaded_dir) = self.loaded_dir {
-
-            //     let loaded_idx = load_output.1;
-
-            //     let gl_ctx = self.framework.display.get_context();
-            //     let process_res = loaded_dir.process_loaded_image(load_output, gl_ctx);
-            //     if let Err(error) = process_res {
-            //       println!("Couldn't process loaded image: {}", error);
-            //     }
-
-            //     if let Some(ref mut placed_image) = loaded_dir.image_at_mut(loaded_idx) {
-            //       placed_image.place_to_fit(self.view_area_size, 20.0);
-            //     }
-
-            //   } else {
-            //     println!("Got load result despite loaded dir not existing?");
-            //   }
-            // } else {
-            //   println!("Error reaceiving loaded image data");
-            // }
           },
           LoadNotification::LoadFailed => {
             println!("Image loading failed!");

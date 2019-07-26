@@ -3,7 +3,7 @@ use std::io;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::fs::{self, DirEntry};
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashSet};
 use glium::backend::Facade;
 use glium::texture::TextureCreationError;
 use crate::image::{self, ImageTexture, PlacedImage};
@@ -14,10 +14,12 @@ use super::ImageHandlingServices;
 pub struct LoadedDir {
   path: Box<Path>,
   entries: Vec<DirEntry>,
+
   loaded_images: Vec<Option<PlacedImage>>,
-  load_history: VecDeque<usize>, // older loads at the front, newer loads at the back
-  
   shown_idx: usize,
+
+  pending_loads: HashSet<usize>,
+  load_history: VecDeque<usize>, // older loads at the front, newer loads at the back
 }
 
 fn offset_idx(idx: usize, max: usize, offset: i32)->usize {
@@ -51,6 +53,7 @@ impl LoadedDir {
     let mut loaded_images = Vec::with_capacity(entries.len());
     loaded_images.resize_with(entries.len(), Default::default);
     let load_history = VecDeque::new();
+    let pending_loads = HashSet::new();
 
     let shown_idx = 0;
 
@@ -58,6 +61,7 @@ impl LoadedDir {
       path,
       entries,
       loaded_images,
+      pending_loads,
       load_history,
       shown_idx,
     })
@@ -85,23 +89,22 @@ impl LoadedDir {
 
   pub fn set_shown(&mut self, idx: usize, services: &ImageHandlingServices) {
     self.shown_idx = idx;
-    if self.loaded_images[idx].is_none() {
-      self.submit_load_request(idx, services);
-    }
-
-    let prev_idx = offset_idx(self.shown_idx, self.entries.len(), -1);
-    if self.loaded_images[prev_idx].is_none() {
-      self.submit_load_request(prev_idx, services);
-    }
-
-    let next_idx = offset_idx(self.shown_idx, self.entries.len(), 1);
-    if self.loaded_images[next_idx].is_none() {
-      self.submit_load_request(next_idx, services);
+    
+    let load_idxs = [idx, offset_idx(self.shown_idx, self.entries.len(), -1), offset_idx(self.shown_idx, self.entries.len(), 1)];
+    for &idx in load_idxs.iter() {
+      if self.needs_load(idx) {
+        self.submit_load_request(idx, services);
+      }
     }
   }
 
-  fn submit_load_request(&self, idx: usize, services: &ImageHandlingServices) {
+  fn needs_load(&self, idx: usize)->bool {
+    self.loaded_images[idx].is_none() && !self.pending_loads.contains(&idx)
+  }
+
+  fn submit_load_request(&mut self, idx: usize, services: &ImageHandlingServices) {
     let path = self.entries[idx].path();
+    self.pending_loads.insert(idx);
     services.loader_pool.submit((path, idx));
   }
 
@@ -112,10 +115,15 @@ impl LoadedDir {
 
       if self.loaded_images[idx].is_none() {
         self.unload_to_free(1, services);
+
         let texture = ImageTexture::from_data(image_data, gl_ctx)?;
         let placed_image = PlacedImage::new(texture);
+
         self.loaded_images[idx] = Some(placed_image);
         self.load_history.push_back(idx);
+        if !self.pending_loads.remove(&idx) {
+          println!("Loaded {}, but no corresponding pending load existed.", idx);
+        }
       } else {
         println!("Image {} was already loaded!", idx);
       };
