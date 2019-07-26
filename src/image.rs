@@ -4,8 +4,9 @@ use std::io;
 use std::path::Path;
 use glium::{
   backend::Facade,
-  texture::{RawImage2d, CompressedSrgbTexture2d, TextureCreationError}
+  texture::{RawImage2d, CompressedSrgbTexture2d, TextureCreationError},
 };
+use glium::glutin::dpi::{LogicalSize, LogicalPosition};
 use stb_image::image::{Image, LoadResult};
 use exif;
 
@@ -101,31 +102,32 @@ impl ImageTexture {
 
 pub struct PlacedImage {
   pub image: ImageTexture,
-  pub pos: [f32; 2],
-  pub scale: f32
+  pub pos: LogicalPosition,
+  pub scale: f64
 }
 
 impl PlacedImage {
   pub fn new(image: ImageTexture)->PlacedImage {
     PlacedImage {
       image: image,
-      pos: [0.0, 0.0],
+      pos: LogicalPosition::new(0.0, 0.0),
       scale: 1.0
     }
   }
 
-  pub fn scaled_size(&self)->[f32; 2] {
+  pub fn scaled_size(&self)->LogicalSize {
     let rotated_size = self.image.rotated_size();
-    [(rotated_size[0] as f32) * self.scale, (rotated_size[1] as f32) * self.scale]
+
+    LogicalSize::new((rotated_size[0] as f64) * self.scale, (rotated_size[1] as f64) * self.scale)
   }
 
-  pub fn corner_data(&self)->[([f32; 2], [f32; 2]); 4] { // order: tl, tr, br, bl
+  pub fn corner_data(&self)->[(LogicalPosition, [f32; 2]); 4] { // order: tl, tr, br, bl
     let scaled_size = self.scaled_size();
 
-    let pos = [[self.pos[0] - scaled_size[0] / 2.0, self.pos[1] - scaled_size[1] / 2.0],
-               [self.pos[0] + scaled_size[0] / 2.0, self.pos[1] - scaled_size[1] / 2.0],
-               [self.pos[0] + scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0],
-               [self.pos[0] - scaled_size[0] / 2.0, self.pos[1] + scaled_size[1] / 2.0]];
+    let pos = [LogicalPosition::new(self.pos.x - scaled_size.width / 2.0, self.pos.y - scaled_size.height / 2.0),
+               LogicalPosition::new(self.pos.x + scaled_size.width / 2.0, self.pos.y - scaled_size.height / 2.0),
+               LogicalPosition::new(self.pos.x + scaled_size.width / 2.0, self.pos.y + scaled_size.height / 2.0),
+               LogicalPosition::new(self.pos.x - scaled_size.width / 2.0, self.pos.y + scaled_size.height / 2.0)];
 
     let rotation_steps = match self.image.rotation {
       ImageRotation::None => 0,
@@ -141,15 +143,15 @@ impl PlacedImage {
   }
 
     // sets scale to fit into a rectangle of `size`, and centers itself within that rectangle
-  pub fn place_to_fit(&mut self, size:[f32; 2], padding:f32) {
+  pub fn place_to_fit(&mut self, size: &LogicalSize, padding: f64) {
     let rotated_size = self.image.rotated_size();
 
-    let x_scale = size[0] / ((rotated_size[0] as f32) + padding);
-    let y_scale = size[1] / ((rotated_size[1] as f32) + padding);
+    let x_scale = size.width / ((rotated_size[0] as f64) + padding);
+    let y_scale = size.height / ((rotated_size[1] as f64) + padding);
     self.scale = x_scale.min(y_scale);
 
-    self.pos[0] = size[0] / 2.0;
-    self.pos[1] = size[1] / 2.0;
+    self.pos.x = size.width / 2.0;
+    self.pos.y = size.height / 2.0;
   }
 }
 

@@ -1,8 +1,8 @@
-use glium::glutin::{self, ContextBuilder};
+use glium::glutin::ContextBuilder;
 use glium::glutin::window::{WindowBuilder};
 use glium::glutin::event_loop::{EventLoop, ControlFlow};
-use glium::glutin::event::Event;
-use glium::glutin::event::WindowEvent;
+use glium::glutin::event::{Event, WindowEvent};
+use glium::glutin::dpi::LogicalSize;
 use glium::Display;
 use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui, DrawData};
 use imgui_glium_renderer::GliumRenderer;
@@ -15,12 +15,12 @@ pub struct Framework {
   pub renderer: GliumRenderer,
 }
 
-pub fn init<T>(title: &str, window_size: [i32; 2]) -> (EventLoop<T>, Context, Framework) {
+pub fn init<T>(title: &str, window_size: &LogicalSize) -> (EventLoop<T>, Context, Framework) {
   let event_loop = EventLoop::<T>::new_user_event();
   let context = ContextBuilder::new().with_vsync(true);
   let builder = WindowBuilder::new()
     .with_title(title.to_owned())
-    .with_inner_size(glutin::dpi::LogicalSize::new(window_size[0] as f64, window_size[1] as f64));
+    .with_inner_size(window_size.clone());
   let display =
     Display::new(builder, context, &event_loop).expect("Failed to initialize display");
 
@@ -101,7 +101,8 @@ pub trait Program {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub enum LoopSignal {
   Wait,
-  Redraw,
+  RequestRedraw,
+  ImmediateRedraw,
   Exit
 }
 
@@ -117,29 +118,12 @@ pub fn run<P:'static + Program>(event_loop: EventLoop<P::UserEvent>, mut imgui: 
 
     let mut loop_signal = program.on_event(&event);
     
+    let mut redraw_event = false;
     match event {
       Event::WindowEvent{event:win_event, .. } => {
         match win_event {
           WindowEvent::RedrawRequested => {
-            {
-              let io = imgui.io_mut();
-              last_frame = io.update_delta_time(last_frame);
-            }
-            
-            let frame_loop_signal = program.on_frame(&mut imgui);
-            loop_signal = loop_signal.max(frame_loop_signal);
-
-              // imgui doesn't react to some events on the same frame they arrive at, but rather one frame late
-              // E.g. if a mouse release arrives, the first frame rendered after that won't see its effects, only the second
-              // So for every event that arrives, we actually do two redraws, to be sure those events take effect
-              // Doing this through two requests is crucial for framerate, if we just did draw_ui twice here every frame would effectively be twice as long
-            if first_redraw {
-              let framework = program.framework();
-              first_redraw = false;
-              let gl_window = framework.display.gl_window();
-              let window = gl_window.window();
-              window.request_redraw();
-            }
+            redraw_event = true;
           }
           _ => {}
         }
@@ -150,9 +134,33 @@ pub fn run<P:'static + Program>(event_loop: EventLoop<P::UserEvent>, mut imgui: 
       _ => {}
     };
 
+    if redraw_event || loop_signal == LoopSignal::ImmediateRedraw {
+      {
+        let io = imgui.io_mut();
+        last_frame = io.update_delta_time(last_frame);
+      }
+      
+      let frame_loop_signal = program.on_frame(&mut imgui);
+      loop_signal = loop_signal.max(frame_loop_signal);
+
+        // imgui doesn't react to some events on the same frame they arrive at, but rather one frame late
+        // E.g. if a mouse release arrives, the first frame rendered after that won't see its effects, only the second
+        // So for every event that arrives, we actually do two redraws, to be sure those events take effect
+        // Doing this through two requests is crucial for framerate, if we just did draw_ui twice here every frame would effectively be twice as long
+      if redraw_event && first_redraw {
+        let framework = program.framework();
+        first_redraw = false;
+        let gl_window = framework.display.gl_window();
+        let window = gl_window.window();
+        window.request_redraw();
+      }
+    }
+
+    
+
     *control_flow = match loop_signal {
       LoopSignal::Wait => ControlFlow::Wait,
-      LoopSignal::Redraw => {
+      LoopSignal::RequestRedraw => {
         let framework = program.framework();
         let gl_window = framework.display.gl_window();
         let window = gl_window.window();
@@ -160,6 +168,7 @@ pub fn run<P:'static + Program>(event_loop: EventLoop<P::UserEvent>, mut imgui: 
         first_redraw = true;
         ControlFlow::Wait
       },
+      LoopSignal::ImmediateRedraw => ControlFlow::Wait,
       LoopSignal::Exit => ControlFlow::Exit
     };
   });

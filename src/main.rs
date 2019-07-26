@@ -7,6 +7,7 @@ use glium::{
 };
 use glium::glutin::event_loop::EventLoop;
 use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
+use glium::glutin::dpi::LogicalSize;
 use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
 use image_display::ImageDisplay;
 use image_handling::{ImageHandling, loader_pool::LoadNotification};
@@ -21,19 +22,19 @@ struct Fotoleine {
   framework: Framework,
   image_handling: ImageHandling,
   image_display: ImageDisplay,
-  view_area_size: [f32; 2],
+  view_area_size: LogicalSize,
 }
 
 impl Fotoleine {
-  fn init(framework: Framework, display_size:&[f32; 2], event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, Box<dyn Error>> {
-    let image_display = ImageDisplay::new(&framework.display, &display_size)?;
+  fn init(framework: Framework, display_size: &LogicalSize, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, Box<dyn Error>> {
+    let image_display = ImageDisplay::new(&framework.display, display_size)?;
     let image_handling = ImageHandling::new(10, 4, &event_loop);
 
     Ok(Fotoleine {
       framework,
       image_handling,
       image_display,
-      view_area_size: [display_size[0], display_size[1]],
+      view_area_size: display_size.clone(),
     })
   }
 
@@ -58,15 +59,19 @@ impl Program for Fotoleine {
         match win_event {
           WindowEvent::CloseRequested 
             => LoopSignal::Exit,
-          WindowEvent::Resized { .. } | WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
+
+          WindowEvent::Resized { .. } => LoopSignal::ImmediateRedraw,
+
+          WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
           WindowEvent::KeyboardInput { .. } | 
           WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } |
           WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } 
-            => LoopSignal::Redraw,
+            => LoopSignal::RequestRedraw,
+
           _ => LoopSignal::Wait
         }
       },
-      Event::UserEvent(_) => LoopSignal::Redraw,
+      Event::UserEvent(_) => LoopSignal::RequestRedraw,
       _ => LoopSignal::Wait
     };
 
@@ -82,7 +87,11 @@ impl Program for Fotoleine {
                 loaded_dir.set_shown(0, &self.image_handling.services);
               }
             }
-          }
+          },
+          WindowEvent::Resized(size) => {
+            self.view_area_size = size.clone();
+            self.image_display.set_display_size(size);
+          },
           _ => {}
         }
       },
@@ -133,7 +142,7 @@ impl Program for Fotoleine {
       }
 
       if let Some(ref mut placed_image) = loaded_dir.image_at_mut(loaded_dir.shown_idx()) {
-        placed_image.place_to_fit(self.view_area_size, 20.0);
+        placed_image.place_to_fit(&self.view_area_size, 20.0);
       };
 
       if ui.is_key_pressed(VirtualKeyCode::O as _) {
@@ -178,9 +187,9 @@ impl Program for Fotoleine {
 
 fn main() {
 
-  let display_size = [1280, 720];
-  let (event_loop, imgui, framework) = init("fotoleine", display_size);
-  let fotoleine = Fotoleine::init(framework, &[display_size[0] as f32, display_size[1] as f32], &event_loop).expect("Couldn't initialize Fotoleine.");
+  let display_size = LogicalSize::new(1280.0, 720.0);
+  let (event_loop, imgui, framework) = init("fotoleine", &display_size);
+  let fotoleine = Fotoleine::init(framework, &display_size, &event_loop).expect("Couldn't initialize Fotoleine.");
 
   run(event_loop, imgui, fotoleine);
 }

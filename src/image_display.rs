@@ -5,6 +5,7 @@ use glium::{
   index::{NoIndices, PrimitiveType},
   implement_vertex, uniform, uniforms::{MinifySamplerFilter, MagnifySamplerFilter}
 };
+use glium::glutin::dpi::LogicalSize;
 use crate::image::PlacedImage;
 
 #[derive(Copy, Clone, Debug)]
@@ -22,7 +23,7 @@ pub struct ImageDisplay {
 }
 
 impl ImageDisplay {
-  pub fn new(display: &Display, display_size:&[f32; 2])->Result<ImageDisplay, Box<dyn Error>> { //:todo: custom error
+  pub fn new(display: &Display, display_size: &LogicalSize)->Result<ImageDisplay, Box<dyn Error>> { //:todo: custom error
     let vertex_buffer = VertexBuffer::empty_dynamic(display, 4)?;
     let index_buffer  = NoIndices(PrimitiveType::TriangleStrip);
 
@@ -56,24 +57,25 @@ impl ImageDisplay {
 
     let program = glium::Program::from_source(display, vertex_shader_src, fragment_shader_src, None)?;
 
-    let display_to_gl = 
-      [[ 2.0 / display_size[0], 0.0, 0.0, 0.0],
-       [ 0.0, -2.0 / display_size[1], 0.0, 0.0],
-       [ 0.0,  0.0, 1.0, 0.0],
-       [-1.0,  1.0, 0.0, 1.0f32]];
-
-    Ok(ImageDisplay{
-      program: program,
+    let mut image_display = ImageDisplay {
+      program,
       vert_buf: vertex_buffer,
       idx_buf: index_buffer,
-      view_matrix: display_to_gl
-    })
+      view_matrix: [[0.0; 4]; 4]
+    };
+    image_display.set_display_size(display_size);
+
+    Ok(image_display)
+  }
+
+  pub fn set_display_size(&mut self, size: &LogicalSize) {
+    self.view_matrix = display_to_gl(size);
   }
 
   pub fn draw_image(&mut self, placed_image: &PlacedImage, target: &mut Frame) {
     let mut corner_data = placed_image.corner_data(); // ordered tl, tr, br, bl
     corner_data.swap(2, 3); // make the order tl, tr, br, bl, as needed for the triangle strip
-    let verts: Vec<_> = corner_data.iter().map(|&(pos, tex_coord)| Vertex{pos, tex_coord}).collect();
+    let verts: Vec<_> = corner_data.iter().map(|&(pos, tex_coord)| Vertex{pos: [pos.x as f32, pos.y as f32], tex_coord}).collect();
 
     self.vert_buf.write(&verts);
 
@@ -84,4 +86,11 @@ impl ImageDisplay {
 
     target.draw(&self.vert_buf, &self.idx_buf, &self.program, &uniforms, &Default::default()).expect("Drawing image geometry failed.");
   }
+}
+
+fn display_to_gl(display_size: &LogicalSize)->[[f32; 4]; 4] {
+  [[ 2.0 / display_size.width as f32, 0.0, 0.0, 0.0],
+   [ 0.0, -2.0 / display_size.height as f32, 0.0, 0.0],
+   [ 0.0,  0.0, 1.0, 0.0],
+   [-1.0,  1.0, 0.0, 1.0f32]]
 }
