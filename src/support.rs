@@ -156,8 +156,6 @@ pub fn run<P:'static + Program>(event_loop: EventLoop<P::UserEvent>, mut imgui: 
       }
     }
 
-    
-
     *control_flow = match loop_signal {
       LoopSignal::Wait => ControlFlow::Wait,
       LoopSignal::RequestRedraw => {

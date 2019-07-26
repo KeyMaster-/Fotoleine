@@ -39,6 +39,19 @@ impl Fotoleine {
   }
 
   fn build_ui(&mut self, ui:&mut Ui) {
+    ui.window(im_str!("Hello world"))
+        .size([300.0, 100.0], Condition::FirstUseEver)
+        .build(|| {
+            ui.text(im_str!("Hello world!"));
+            ui.text(im_str!("こんにちは世界！"));
+            ui.text(im_str!("This...is...imgui-rs!"));
+            ui.separator();
+            let mouse_pos = ui.io().mouse_pos;
+            ui.text(format!(
+                "Mouse Position: ({:.1},{:.1})",
+                mouse_pos[0], mouse_pos[1]
+            ));
+        });
   }
 }
 
@@ -60,13 +73,17 @@ impl Program for Fotoleine {
           WindowEvent::CloseRequested 
             => LoopSignal::Exit,
 
-          WindowEvent::Resized { .. } => LoopSignal::ImmediateRedraw,
+            // On resize, need to use immediate redraw to update the visuals because a redraw request won't arrive until the resizing is done
+            // Input events need to trigger an immediate redraw, since otherwise, both e.g. a key down and a key up event can arrive in the same batch
+            //  In that case, a redraw request won't arrive until after both those events were processed, which means that imgui never sees the change from not pressed to pressed, effectively making it miss the input
+            //  This should probably be done to all inputs, including cursor movement. However, redrawing on every cursor move makes the app feel more frame-y
+          WindowEvent::Resized { .. } | 
+          WindowEvent::KeyboardInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } 
+            => LoopSignal::ImmediateRedraw,
 
           WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
-          WindowEvent::KeyboardInput { .. } | 
-          WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } |
-          WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } 
-            => LoopSignal::RequestRedraw,
+          WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. }
+            => LoopSignal::RequestRedraw,          
 
           _ => LoopSignal::Wait
         }
