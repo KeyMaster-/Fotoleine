@@ -1,79 +1,44 @@
 use std::error::Error;
-use std::path::PathBuf;
 use std::process::Command;
 use imgui::*;
 use glium::{
   Surface,
   backend::Facade,
 };
-use glium::glutin::event_loop::{EventLoop, EventLoopProxy, EventLoopClosed};
+use glium::glutin::event_loop::EventLoop;
 use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
 use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
-use image::ImageData;
-use loaded_dir::LoadedDir;
 use image_display::ImageDisplay;
-use worker_pool::{WorkerPool, Worker};
-use std::sync::mpsc::Sender;
+use image_handling::{ImageHandling, loader_pool::LoadNotification};
 
 mod support;
 mod image;
-mod loaded_dir;
+mod image_handling;
 mod image_display;
 mod worker_pool;
 
-pub struct LoadWorker {
-  id: usize,
-  event_loop_proxy: EventLoopProxy<<Fotoleine as Program>::UserEvent>,
-}
-
-impl Worker for LoadWorker {
-  type Input = (PathBuf, usize);
-  type Output = (ImageData, usize);
-
-  fn execute(&mut self, input: Self::Input, output: &Sender<Self::Output>) {
-    let (path, idx) = input;
-    let img_data_res = ImageData::load(&path);
-    let event_message = 
-      if let Ok(img_data) = img_data_res {
-        let output_data = (img_data, idx);
-        let send_res = output.send(output_data);
-        match send_res {
-          Ok(_) => {
-            println!("Worker {}: channel send succeeded", self.id);
-            LoadNotification::ImageLoaded
-          },
-          Err(error) => {
-            println!("Worker {}: channel send failed, {}", self.id, error);
-            LoadNotification::LoadFailed
-          }
-        }
-      } else {
-        LoadNotification::LoadFailed
-      };
-
-    match self.event_loop_proxy.send_event(event_message) {
-      Ok(()) => println!("Worker {}: Send succeeded", self.id),
-      Err(EventLoopClosed) => println!("Worker {}: Event loop closed", self.id)
-    };
-  }
-}
-
-type LoaderPool = WorkerPool<LoadWorker>;
-
 struct Fotoleine {
   framework: Framework,
-  view_area_size: [f32; 2],
-  loaded_dir: Option<LoadedDir>,
+  image_handling: ImageHandling,
   image_display: ImageDisplay,
-  loader_pool: WorkerPool<LoadWorker>
+  view_area_size: [f32; 2],
 }
 
-  // using separate channels to notify about load, and actually send the load,
-  // because the payload for winit user events is constrained to be Clone, which is not what I want.
-#[derive(Debug)]
-enum LoadNotification {
-  ImageLoaded,
-  LoadFailed
+impl Fotoleine {
+  fn init(framework: Framework, display_size:&[f32; 2], event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, Box<dyn Error>> {
+    let image_display = ImageDisplay::new(&framework.display, &display_size)?;
+    let image_handling = ImageHandling::new(10, 4, &event_loop);
+
+    Ok(Fotoleine {
+      framework,
+      image_handling,
+      image_display,
+      view_area_size: [display_size[0], display_size[1]],
+    })
+  }
+
+  fn build_ui(&mut self, ui:&mut Ui) {
+  }
 }
 
 impl Program for Fotoleine {
@@ -109,9 +74,13 @@ impl Program for Fotoleine {
       Event::WindowEvent{event:win_event, .. } => {
         match win_event {
           WindowEvent::DroppedFile(path) => {
-            self.loaded_dir = LoadedDir::new(&path).ok();
-            if let Some(ref mut loaded_dir) = self.loaded_dir {
-              loaded_dir.set_shown(0, &self.loader_pool);
+            let load_res = self.image_handling.load_path(&path);
+            if let Err(load_error) = load_res {
+              println!("Couldn't load path {}: {}", path.to_string_lossy(), load_error);
+            } else {
+              if let Some(ref mut loaded_dir) = self.image_handling.loaded_dir {
+                loaded_dir.set_shown(0, &self.image_handling.services);
+              }
             }
           }
           _ => {}
@@ -121,29 +90,40 @@ impl Program for Fotoleine {
         println!("User event received, value {:?}", notification);
         match notification {
           LoadNotification::ImageLoaded => {
-            let load_output_res = self.loader_pool.output.recv();
-            if let Ok(load_output) = load_output_res {
-
-              if let Some(ref mut loaded_dir) = self.loaded_dir {
-
-                let loaded_idx = load_output.1;
-
-                let gl_ctx = self.framework.display.get_context();
-                let process_res = loaded_dir.process_loaded_image(load_output, gl_ctx);
-                if let Err(error) = process_res {
-                  println!("Couldn't process loaded image: {}", error);
-                }
-
-                if let Some(ref mut placed_image) = loaded_dir.image_at_mut(loaded_idx) {
-                  placed_image.place_to_fit(self.view_area_size, 20.0);
-                }
-
-              } else {
-                println!("Got load result despite loaded dir not existing?");
+            if let Some(ref mut loaded_dir) = self.image_handling.loaded_dir {
+              let gl_ctx = self.framework.display.get_context();
+              let load_res = loaded_dir.receive_image(&self.image_handling.services, gl_ctx);
+              if let Err(error) = load_res {
+                println!("Error receiving image: {}", error);
               }
             } else {
-              println!("Error reaceiving loaded image data");
+                //:todo: this could happen if an invalid path was loaded while a load was pending
+                // it's fine to discard the image in that case though
+              println!("Received load result, but loaded_dir does not exist!");
             }
+            // let load_output_res = self.loader_pool.output.recv();
+            // if let Ok(load_output) = load_output_res {
+
+            //   if let Some(ref mut loaded_dir) = self.loaded_dir {
+
+            //     let loaded_idx = load_output.1;
+
+            //     let gl_ctx = self.framework.display.get_context();
+            //     let process_res = loaded_dir.process_loaded_image(load_output, gl_ctx);
+            //     if let Err(error) = process_res {
+            //       println!("Couldn't process loaded image: {}", error);
+            //     }
+
+            //     if let Some(ref mut placed_image) = loaded_dir.image_at_mut(loaded_idx) {
+            //       placed_image.place_to_fit(self.view_area_size, 20.0);
+            //     }
+
+            //   } else {
+            //     println!("Got load result despite loaded dir not existing?");
+            //   }
+            // } else {
+            //   println!("Error reaceiving loaded image data");
+            // }
           },
           LoadNotification::LoadFailed => {
             println!("Image loading failed!");
@@ -168,11 +148,11 @@ impl Program for Fotoleine {
       loop_signal = LoopSignal::Exit;
     }
 
-    if let Some(ref mut loaded_dir) = self.loaded_dir {
+    if let Some(ref mut loaded_dir) = self.image_handling.loaded_dir {
       if ui.is_key_pressed(VirtualKeyCode::A as _) {
-        loaded_dir.set_shown(loaded_dir.offset_idx(-1), &self.loader_pool);
+        loaded_dir.set_shown(loaded_dir.offset_idx(-1), &self.image_handling.services);
       } else if ui.is_key_pressed(VirtualKeyCode::D as _) {
-        loaded_dir.set_shown(loaded_dir.offset_idx( 1), &self.loader_pool);
+        loaded_dir.set_shown(loaded_dir.offset_idx( 1), &self.image_handling.services);
       }
 
       if let Some(ref mut placed_image) = loaded_dir.image_at_mut(loaded_dir.shown_idx()) {
@@ -200,7 +180,7 @@ impl Program for Fotoleine {
     let mut target = self.framework.display.draw();
     target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
 
-    if let Some(ref loaded_dir) = self.loaded_dir {
+    if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
       if let Some(ref placed_image) = loaded_dir.image_at(loaded_dir.shown_idx()) {
         self.image_display.draw_image(placed_image, &mut target);
       }
@@ -216,30 +196,6 @@ impl Program for Fotoleine {
 
   fn on_shutdown(&mut self) {
     println!("Shutting down");
-  }
-}
-
-impl Fotoleine {
-  fn init(framework: Framework, display_size:&[f32; 2], event_loop: &EventLoop<<Self as Program>::UserEvent>)->Result<Fotoleine, Box<dyn Error>> {
-    let image_display = ImageDisplay::new(&framework.display, &display_size)?;
-    let loader_pool = WorkerPool::new(4, |id| {
-      LoadWorker {
-        id: id,
-        event_loop_proxy: event_loop.create_proxy()
-      }
-    });
-
-
-    Ok(Fotoleine {
-      framework: framework,
-      view_area_size: [display_size[0], display_size[1]],
-      loaded_dir: None,
-      image_display,
-      loader_pool
-    })
-  }
-
-  fn build_ui(&mut self, ui:&mut Ui) {
   }
 }
 

@@ -3,16 +3,20 @@ use std::io;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::fs::{self, DirEntry};
+use std::collections::VecDeque;
 use glium::backend::Facade;
 use glium::texture::TextureCreationError;
-use crate::image::{self, ImageData, ImageTexture, PlacedImage};
-use crate::LoaderPool;
+use crate::image::{self, ImageTexture, PlacedImage};
+use super::ImageHandlingServices;
+
 
   // A loaded directory of images we want to display
 pub struct LoadedDir {
   path: Box<Path>,
   entries: Vec<DirEntry>,
   loaded_images: Vec<Option<PlacedImage>>,
+  load_history: VecDeque<usize>, // older loads at the front, newer loads at the back
+  
   shown_idx: usize,
 }
 
@@ -41,11 +45,12 @@ impl LoadedDir {
 
     let entries: Vec<_> = dir_iter
       .filter_map(|entry_res| entry_res.ok())
-      .filter(|entry| is_relevant_file(entry))
+      .filter(|entry| file_is_relevant(entry))
       .collect();
 
     let mut loaded_images = Vec::with_capacity(entries.len());
     loaded_images.resize_with(entries.len(), Default::default);
+    let load_history = VecDeque::new();
 
     let shown_idx = 0;
 
@@ -53,6 +58,7 @@ impl LoadedDir {
       path,
       entries,
       loaded_images,
+      load_history,
       shown_idx,
     })
   }
@@ -77,44 +83,62 @@ impl LoadedDir {
     self.entries[idx].path()
   }
 
-  pub fn set_shown(&mut self, idx: usize, loader_pool: &LoaderPool) {
+  pub fn set_shown(&mut self, idx: usize, services: &ImageHandlingServices) {
     self.shown_idx = idx;
     if self.loaded_images[idx].is_none() {
-      self.submit_load_request(idx, &loader_pool);
+      self.submit_load_request(idx, services);
     }
 
     let prev_idx = offset_idx(self.shown_idx, self.entries.len(), -1);
     if self.loaded_images[prev_idx].is_none() {
-      self.submit_load_request(prev_idx, &loader_pool);
+      self.submit_load_request(prev_idx, services);
     }
 
     let next_idx = offset_idx(self.shown_idx, self.entries.len(), 1);
     if self.loaded_images[next_idx].is_none() {
-      self.submit_load_request(next_idx, &loader_pool);
+      self.submit_load_request(next_idx, services);
     }
   }
 
-  fn submit_load_request(&self, idx: usize, loader_pool: &LoaderPool) {
+  fn submit_load_request(&self, idx: usize, services: &ImageHandlingServices) {
     let path = self.entries[idx].path();
-    loader_pool.submit((path, idx));
+    services.loader_pool.submit((path, idx));
   }
 
-  pub fn process_loaded_image<F: Facade>(&mut self, load_output: (ImageData, usize), gl_ctx: &F)->Result<(), TextureCreationError> {
-    let (image_data, idx) = load_output;
-    let texture = ImageTexture::from_data(image_data, gl_ctx)?;
-    let placed_image = PlacedImage::new(texture);
+  pub fn receive_image<F: Facade>(&mut self, services: &ImageHandlingServices, gl_ctx: &F)->Result<(), TextureCreationError> {
+    let load_output_res = services.loader_pool.output.recv(); // :todo: pass to outside
+    if let Ok(load_output) = load_output_res {
+      let (image_data, idx) = load_output;
 
-    if self.loaded_images[idx].is_none() {
-      self.loaded_images[idx] = Some(placed_image);
+      if self.loaded_images[idx].is_none() {
+        self.unload_to_free(1, services);
+        let texture = ImageTexture::from_data(image_data, gl_ctx)?;
+        let placed_image = PlacedImage::new(texture);
+        self.loaded_images[idx] = Some(placed_image);
+        self.load_history.push_back(idx);
+      } else {
+        println!("Image {} was already loaded!", idx);
+      };
+
+      Ok(())
     } else {
-      println!("Image {} was already loaded!", idx);
-    };
+      println!("loader pool output channel closed!");
+      Ok(())
+    }
+  }
 
-    Ok(())
+  fn unload_to_free(&mut self, free_target: usize, services: &ImageHandlingServices) {
+    while self.load_history.len() > services.max_images_loaded - free_target {
+      if let Some(unload_idx) = self.load_history.pop_front() {
+        self.loaded_images[unload_idx].take();
+      } else {
+        println!("Needed to unload images, but no indices exist to unload?");
+      }
+    }
   }
 }
 
-fn is_relevant_file(entry:&DirEntry)->bool {
+fn file_is_relevant(entry:&DirEntry)->bool {
   let path = entry.path();
   if !path.is_file() {
     return false;
