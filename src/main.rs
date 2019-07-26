@@ -39,19 +39,6 @@ impl Fotoleine {
   }
 
   fn build_ui(&mut self, ui:&mut Ui) {
-    ui.window(im_str!("Hello world"))
-        .size([300.0, 100.0], Condition::FirstUseEver)
-        .build(|| {
-            ui.text(im_str!("Hello world!"));
-            ui.text(im_str!("こんにちは世界！"));
-            ui.text(im_str!("This...is...imgui-rs!"));
-            ui.separator();
-            let mouse_pos = ui.io().mouse_pos;
-            ui.text(format!(
-                "Mouse Position: ({:.1},{:.1})",
-                mouse_pos[0], mouse_pos[1]
-            ));
-        });
   }
 }
 
@@ -81,6 +68,8 @@ impl Program for Fotoleine {
           WindowEvent::KeyboardInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } 
             => LoopSignal::ImmediateRedraw,
 
+            // cursor moved not doing an instant redraw might mean that intermediate mouse positions are not detected on long blocking frames
+            // so certain hover states may not be detected. this is deemed acceptable though, since doing immediate redraws on mouse movement has a noticeable impact on UI smootheness
           WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
           WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. }
             => LoopSignal::RequestRedraw,          
