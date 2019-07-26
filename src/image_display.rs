@@ -3,7 +3,7 @@ use glium::{
   Display, Frame, Surface,
   VertexBuffer,
   index::{NoIndices, PrimitiveType},
-  implement_vertex, uniform
+  implement_vertex, uniform, uniforms::{MinifySamplerFilter, MagnifySamplerFilter}
 };
 use crate::image::PlacedImage;
 
@@ -79,7 +79,7 @@ impl ImageDisplay {
 
     let uniforms = uniform! {
       transform: self.view_matrix,
-      img: &placed_image.image.texture
+      img: placed_image.image.texture.sampled().minify_filter(MinifySamplerFilter::NearestMipmapLinear).magnify_filter(MagnifySamplerFilter::Linear)
     };
 
     target.draw(&self.vert_buf, &self.idx_buf, &self.program, &uniforms, &Default::default()).expect("Drawing image geometry failed.");
