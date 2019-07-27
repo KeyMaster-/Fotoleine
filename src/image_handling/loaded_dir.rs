@@ -1,9 +1,10 @@
 use std::error::Error;
 use std::io;
 use std::fmt;
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::fs::{self, DirEntry};
-use std::collections::{VecDeque, HashSet};
+use std::collections::{HashMap, HashSet};
 use glium::backend::Facade;
 use glium::texture::TextureCreationError;
 use crate::image::{self, ImageTexture, PlacedImage};
@@ -15,11 +16,10 @@ pub struct LoadedDir {
   path: Box<Path>,
   entries: Vec<DirEntry>,
 
-  loaded_images: Vec<Option<PlacedImage>>,
+  loaded_images: HashMap<usize, PlacedImage>,
   shown_idx: usize,
 
   pending_loads: HashSet<usize>,
-  load_history: VecDeque<usize>, // older loads at the front, newer loads at the back
 }
 
 fn offset_idx(idx: usize, max: usize, offset: i32)->usize {
@@ -27,17 +27,12 @@ fn offset_idx(idx: usize, max: usize, offset: i32)->usize {
   let max = max as i32;
 
   signed_idx += offset;
-  while signed_idx < 0 {
-    signed_idx += max;
-  }
-  while signed_idx >= max {
-    signed_idx -= max;
-  }
-  signed_idx as usize
+
+  signed_idx.max(0).min(max - 1) as usize // clamp to [0, max-1]
 }
 
 impl LoadedDir {
-  pub fn new(path: &Path)->Result<LoadedDir, DirLoadError> {
+  pub fn new(path: &Path, services: &ImageHandlingServices)->Result<LoadedDir, DirLoadError> {
     if !path.is_dir() {
       return Err(DirLoadError::NotADirectory);
     }
@@ -50,9 +45,7 @@ impl LoadedDir {
       .filter(|entry| file_is_relevant(entry))
       .collect();
 
-    let mut loaded_images = Vec::with_capacity(entries.len());
-    loaded_images.resize_with(entries.len(), Default::default);
-    let load_history = VecDeque::new();
+    let loaded_images = HashMap::with_capacity(1 + services.load_behind_count + services.load_ahead_count);
     let pending_loads = HashSet::new();
 
     let shown_idx = 0;
@@ -61,9 +54,8 @@ impl LoadedDir {
       path,
       entries,
       loaded_images,
-      pending_loads,
-      load_history,
       shown_idx,
+      pending_loads,
     })
   }
 
@@ -75,23 +67,32 @@ impl LoadedDir {
     offset_idx(self.shown_idx, self.entries.len(), offset)
   }
 
-  pub fn image_at(&self, idx: usize)->&Option<PlacedImage> {
-    &self.loaded_images[idx]
+  pub fn image_at(&self, idx: usize)->Option<&PlacedImage> {
+    self.loaded_images.get(&idx)
   }
 
-  pub fn image_at_mut(&mut self, idx: usize)->&mut Option<PlacedImage> {
-    &mut self.loaded_images[idx]
+  pub fn image_at_mut(&mut self, idx: usize)->Option<&mut PlacedImage> {
+    self.loaded_images.get_mut(&idx)
   }
 
   pub fn path_at(&self, idx: usize)->PathBuf {
     self.entries[idx].path()
   }
 
+  fn idxs_to_load(&self, idx: usize, services: &ImageHandlingServices)->RangeInclusive<usize> {
+    let start = offset_idx(idx, self.entries.len(), -(services.load_behind_count as i32));
+    let end = offset_idx(idx, self.entries.len(), services.load_ahead_count as i32);
+
+    start..=end
+  }
+
   pub fn set_shown(&mut self, idx: usize, services: &ImageHandlingServices) {
     self.shown_idx = idx;
-    
-    let load_idxs = [idx, offset_idx(self.shown_idx, self.entries.len(), -1), offset_idx(self.shown_idx, self.entries.len(), 1)];
-    for &idx in load_idxs.iter() {
+
+    let to_load = self.idxs_to_load(idx, services);
+    self.loaded_images.retain(|key, _| to_load.contains(key));
+
+    for idx in to_load {
       if self.needs_load(idx) {
         self.submit_load_request(idx, services);
       }
@@ -99,7 +100,7 @@ impl LoadedDir {
   }
 
   fn needs_load(&self, idx: usize)->bool {
-    self.loaded_images[idx].is_none() && !self.pending_loads.contains(&idx)
+    !self.loaded_images.contains_key(&idx) && !self.pending_loads.contains(&idx)
   }
 
   fn submit_load_request(&mut self, idx: usize, services: &ImageHandlingServices) {
@@ -109,18 +110,16 @@ impl LoadedDir {
   }
 
   pub fn receive_image<F: Facade>(&mut self, services: &ImageHandlingServices, gl_ctx: &F)->Result<(), TextureCreationError> {
-    let load_output_res = services.loader_pool.output.recv(); // :todo: pass to outside
+    let load_output_res = services.loader_pool.output.recv(); // :todo: pass error to outside
     if let Ok(load_output) = load_output_res {
       let (image_data, idx) = load_output;
 
-      if self.loaded_images[idx].is_none() {
-        self.unload_to_free(1, services);
+      if !self.loaded_images.contains_key(&idx) {
 
         let texture = ImageTexture::from_data(image_data, gl_ctx)?;
         let placed_image = PlacedImage::new(texture);
 
-        self.loaded_images[idx] = Some(placed_image);
-        self.load_history.push_back(idx);
+        self.loaded_images.insert(idx, placed_image);
         if !self.pending_loads.remove(&idx) {
           println!("Loaded {}, but no corresponding pending load existed.", idx);
         }
@@ -132,16 +131,6 @@ impl LoadedDir {
     } else {
       println!("loader pool output channel closed!");
       Ok(())
-    }
-  }
-
-  fn unload_to_free(&mut self, free_target: usize, services: &ImageHandlingServices) {
-    while self.load_history.len() > services.max_images_loaded - free_target {
-      if let Some(unload_idx) = self.load_history.pop_front() {
-        self.loaded_images[unload_idx].take();
-      } else {
-        println!("Needed to unload images, but no indices exist to unload?");
-      }
     }
   }
 }

@@ -28,7 +28,7 @@ struct Fotoleine {
 impl Fotoleine {
   fn init(framework: Framework, display_size: &LogicalSize, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, Box<dyn Error>> {
     let image_display = ImageDisplay::new(&framework.display, display_size)?;
-    let image_handling = ImageHandling::new(10, 4, &event_loop);
+    let image_handling = ImageHandling::new(3, 7, 4, &event_loop); // keep 3 images behind the current one loaded, load the 7 next, have 4 worker threads
 
     Ok(Fotoleine {
       framework,
@@ -192,7 +192,6 @@ impl Program for Fotoleine {
 }
 
 fn main() {
-
   let display_size = LogicalSize::new(1280.0, 720.0);
   let (event_loop, imgui, framework) = init("fotoleine", &display_size);
   let fotoleine = Fotoleine::init(framework, &display_size, &event_loop).expect("Couldn't initialize Fotoleine.");

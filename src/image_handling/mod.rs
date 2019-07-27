@@ -12,8 +12,8 @@ pub struct ImageHandling {
 }
 
 impl ImageHandling {
-  pub fn new(max_images_loaded: usize, thread_pool_size: usize, event_loop: &EventLoop<LoadNotification>)->ImageHandling {
-    let services = ImageHandlingServices::new(max_images_loaded, thread_pool_size, event_loop);
+  pub fn new(load_behind_count: usize, load_ahead_count: usize, thread_pool_size: usize, event_loop: &EventLoop<LoadNotification>)->ImageHandling {
+    let services = ImageHandlingServices::new(load_behind_count, load_ahead_count, thread_pool_size, event_loop);
     ImageHandling {
       services,
       loaded_dir: None
@@ -21,7 +21,7 @@ impl ImageHandling {
   }
 
   pub fn load_path(&mut self, path: &Path)->Result<(), DirLoadError> {
-    let loaded_dir = LoadedDir::new(path)?;
+    let loaded_dir = LoadedDir::new(path, &self.services)?;
     self.loaded_dir = Some(loaded_dir);
     Ok(())
   }
@@ -29,14 +29,16 @@ impl ImageHandling {
 
 pub struct ImageHandlingServices {
   loader_pool: LoaderPool,
-  max_images_loaded: usize,
+  load_behind_count: usize,
+  load_ahead_count: usize
 }
 
 impl ImageHandlingServices {
-  fn new(max_images_loaded: usize, thread_pool_size: usize, event_loop: &EventLoop<LoadNotification>)->ImageHandlingServices {
+  fn new(load_behind_count: usize, load_ahead_count: usize, thread_pool_size: usize, event_loop: &EventLoop<LoadNotification>)->ImageHandlingServices {
     let loader_pool = loader_pool::new(thread_pool_size, event_loop);
     ImageHandlingServices {
-      max_images_loaded,
+      load_behind_count,
+      load_ahead_count,
       loader_pool
     }
   }
