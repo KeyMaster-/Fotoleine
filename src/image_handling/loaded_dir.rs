@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::io;
 use std::fmt;
-use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::fs::{self, DirEntry};
 use std::collections::{HashMap, HashSet};
@@ -17,6 +16,7 @@ pub struct LoadedDir {
   entries: Vec<DirEntry>,
 
   loaded_images: HashMap<usize, PlacedImage>,
+  load_pivot: usize,
   shown_idx: usize,
 
   pending_loads: HashSet<usize>,
@@ -45,18 +45,24 @@ impl LoadedDir {
       .filter(|entry| file_is_relevant(entry))
       .collect();
 
-    let loaded_images = HashMap::with_capacity(1 + services.load_behind_count + services.load_ahead_count);
+    let loaded_images = HashMap::with_capacity(services.loading_policy.max_loaded_image_count());
     let pending_loads = HashSet::new();
 
     let shown_idx = 0;
+    let load_pivot = 0;
 
-    Ok(LoadedDir {
+    let mut loaded_dir = LoadedDir {
       path,
       entries,
       loaded_images,
+      load_pivot,
       shown_idx,
       pending_loads,
-    })
+    };
+
+    loaded_dir.update_loaded(services);
+
+    Ok(loaded_dir)
   }
 
   pub fn shown_idx(&self)->usize {
@@ -79,20 +85,19 @@ impl LoadedDir {
     self.entries[idx].path()
   }
 
-  fn idxs_to_load(&self, idx: usize, services: &ImageHandlingServices)->RangeInclusive<usize> {
-    let start = offset_idx(idx, self.entries.len(), -(services.load_behind_count as i32));
-    let end = offset_idx(idx, self.entries.len(), services.load_ahead_count as i32);
-
-    start..=end
-  }
-
   pub fn set_shown(&mut self, idx: usize, services: &ImageHandlingServices) {
     self.shown_idx = idx;
 
-    let to_load = self.idxs_to_load(idx, services);
-    self.loaded_images.retain(|key, _| to_load.contains(key));
+    self.update_loaded(services);
+  }
 
-    for idx in to_load {
+  fn update_loaded(&mut self, services: &ImageHandlingServices) {
+    let (new_pivot, load_range) = services.loading_policy.get_load_range(self.load_pivot, self.shown_idx, self.entries.len());
+    self.load_pivot = new_pivot;
+
+    self.loaded_images.retain(|key, _| load_range.contains(key));
+
+    for idx in load_range {
       if self.needs_load(idx) {
         self.submit_load_request(idx, services);
       }

@@ -28,7 +28,12 @@ struct Fotoleine {
 impl Fotoleine {
   fn init(framework: Framework, display_size: &LogicalSize, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, Box<dyn Error>> {
     let image_display = ImageDisplay::new(&framework.display, display_size)?;
-    let image_handling = ImageHandling::new(3, 7, 4, &event_loop); // keep 3 images behind the current one loaded, load the 7 next, have 4 worker threads
+      // 2 images on either side of shown that can be flicked between without triggering loads. 
+      // keep 2 images behind the buffer zone
+      // load the next 5 images after the buffer zone
+      //   For a total of 1 + 2 * 2 + 2 + 5 = 12 loaded images at any time
+      // have 4 worker threads
+    let image_handling = ImageHandling::new(2, 2, 5, 4, &event_loop);
 
     Ok(Fotoleine {
       framework,
@@ -88,11 +93,12 @@ impl Program for Fotoleine {
             let load_res = self.image_handling.load_path(&path);
             if let Err(load_error) = load_res {
               println!("Couldn't load path {}: {}", path.to_string_lossy(), load_error);
-            } else {
-              if let Some(ref mut loaded_dir) = self.image_handling.loaded_dir {
-                loaded_dir.set_shown(0, &self.image_handling.services);
-              }
-            }
+            } 
+            // else {
+            //   if let Some(ref mut loaded_dir) = self.image_handling.loaded_dir {
+            //     loaded_dir.set_shown(0, &self.image_handling.services);
+            //   }
+            // }
           },
           WindowEvent::Resized(size) => {
             self.view_area_size = size.clone();
