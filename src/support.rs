@@ -4,7 +4,7 @@ use glium::glutin::event_loop::{EventLoop, ControlFlow};
 use glium::glutin::event::{Event, WindowEvent};
 use glium::glutin::dpi::LogicalSize;
 use glium::Display;
-use imgui::{Context, FontConfig, FontGlyphRanges, FontSource, Ui, DrawData};
+use imgui::{Context, FontConfig, FontSource, Ui, DrawData};
 use imgui_glium_renderer::GliumRenderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::time::Instant;
@@ -42,16 +42,7 @@ pub fn init<T>(title: &str, window_size: &LogicalSize) -> (EventLoop<T>, Context
         size_pixels: font_size,
         ..FontConfig::default()
       }),
-    },
-    FontSource::TtfData {
-      data: include_bytes!("../resources/mplus-1p-regular.ttf"),
-      size_pixels: font_size,
-      config: Some(FontConfig {
-        rasterizer_multiply: 1.75,
-        glyph_ranges: FontGlyphRanges::japanese(),
-        ..FontConfig::default()
-      }),
-    },
+    }
   ]);
 
   imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;

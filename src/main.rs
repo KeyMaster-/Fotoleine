@@ -22,13 +22,14 @@ const INVIS_WINDOW_FLAGS: ImGuiWindowFlags = ImGuiWindowFlags::from_bits_truncat
 
 struct Fotoleine {
   framework: Framework,
+  font: FontId,
   image_handling: ImageHandling,
   image_display: ImageDisplay,
   view_area_size: LogicalSize,
 }
 
 impl Fotoleine {
-  fn init(framework: Framework, display_size: &LogicalSize, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, Box<dyn Error>> {
+  fn init(mut framework: Framework, display_size: &LogicalSize, imgui: &mut Context, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, Box<dyn Error>> {
     let image_display = ImageDisplay::new(&framework.display, display_size)?;
       // 2 images on either side of shown that can be flicked between without triggering loads. 
       // keep 2 images behind the buffer zone
@@ -37,8 +38,21 @@ impl Fotoleine {
       // have 4 worker threads
     let image_handling = ImageHandling::new(2, 2, 5, 4, &event_loop);
 
+      // consider moving this and the font id storage into framework
+    let inter_font = imgui.fonts().add_font(&[
+      FontSource::TtfData {
+        data: include_bytes!("../resources/Inter-Light-BETA.ttf"),
+        size_pixels: (18.0 * framework.platform.hidpi_factor()) as f32,
+        config: None,
+      }
+    ]);
+
+    framework.renderer.reload_font_texture(imgui)
+      .expect("Couldn't reload font");
+
     Ok(Fotoleine {
       framework,
+      font: inter_font,
       image_handling,
       image_display,
       view_area_size: display_size.clone(),
@@ -46,6 +60,7 @@ impl Fotoleine {
   }
 
   fn build_ui(&mut self, ui:&mut Ui) {
+    let _font = ui.push_font(self.font);
     ui.window(im_str!("overlay"))
       .flags(INVIS_WINDOW_FLAGS)
       .position([0.0, 0.0], Condition::Always)
@@ -235,8 +250,8 @@ impl Program for Fotoleine {
 
 fn main() {
   let display_size = LogicalSize::new(1280.0, 720.0);
-  let (event_loop, imgui, framework) = init("fotoleine", &display_size);
-  let fotoleine = Fotoleine::init(framework, &display_size, &event_loop).expect("Couldn't initialize Fotoleine.");
+  let (event_loop, mut imgui, framework) = init("fotoleine", &display_size);
+  let fotoleine = Fotoleine::init(framework, &display_size, &mut imgui, &event_loop).expect("Couldn't initialize Fotoleine.");
 
   run(event_loop, imgui, fotoleine);
 }
