@@ -51,10 +51,9 @@ impl Fotoleine {
       .position([0.0, 0.0], Condition::Always)
       .size([self.view_area_size.width as f32, self.view_area_size.height as f32], Condition::Always) // :todo: currently assumes view area size is full screen size
       .build(|| {
-
+        if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
           // image index in folder
-        {
-          if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
+          {
             let image_count = loaded_dir.image_count();
             let shown_idx = loaded_dir.shown_idx();
             let count_str = format!("{}", image_count);
@@ -66,6 +65,20 @@ impl Fotoleine {
             ui.set_cursor_pos([(self.view_area_size.width as f32) - text_size[0] - padding, (self.view_area_size.height as f32) - text_size[1] - padding]);
             ui.text(text);
           }
+
+          {
+            if let None = loaded_dir.image_at(loaded_dir.shown_idx()) {
+              let text = im_str!("Image loading...");
+              let text_size = ui.calc_text_size(&text, false, -1.0); // :todo: move out text alignment utilities into a function & module
+              ui.set_cursor_pos([(self.view_area_size.width as f32) / 2.0 - text_size[0] / 2.0, (self.view_area_size.height as f32) / 2.0 - text_size[1] / 2.0]);
+              ui.text(text);
+            }
+          }
+        } else {
+          let text = im_str!("Drag a folder with images into the window to load it.");
+          let text_size = ui.calc_text_size(&text, false, -1.0);
+          ui.set_cursor_pos([(self.view_area_size.width as f32) / 2.0 - text_size[0] / 2.0, (self.view_area_size.height as f32) / 2.0 - text_size[1] / 2.0]);
+          ui.text(text);
         }
       });
   }
