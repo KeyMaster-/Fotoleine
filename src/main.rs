@@ -127,7 +127,6 @@ impl Program for Fotoleine {
         }
       },
       Event::UserEvent(notification) => {
-        println!("User event received, value {:?}", notification);
         match notification {
           LoadNotification::ImageLoaded => {
             if let Some(ref mut loaded_dir) = self.image_handling.loaded_dir {

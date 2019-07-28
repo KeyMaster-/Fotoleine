@@ -30,7 +30,6 @@ impl Worker for LoadWorker {
         let send_res = output.send(output_data);
         match send_res {
           Ok(_) => {
-            println!("Worker {}: channel send succeeded", self.id);
             LoadNotification::ImageLoaded
           },
           Err(error) => {
@@ -43,7 +42,7 @@ impl Worker for LoadWorker {
       };
 
     match self.event_loop_proxy.send_event(event_message) {
-      Ok(()) => println!("Worker {}: Send succeeded", self.id),
+      Ok(()) => {},
       Err(EventLoopClosed) => println!("Worker {}: Event loop closed", self.id)
     };
   }
