@@ -29,7 +29,7 @@ struct Fotoleine {
 }
 
 impl Fotoleine {
-  fn init(mut framework: Framework, display_size: &LogicalSize, imgui: &mut Context, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, Box<dyn Error>> {
+  fn init(mut framework: Framework, display_size: &LogicalSize, imgui: &mut Context, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, FotoleineInitError> {
     let image_display = ImageDisplay::new(&framework.display, display_size)?;
       // 2 images on either side of shown that can be flicked between without triggering loads. 
       // keep 2 images behind the buffer zone
@@ -254,4 +254,43 @@ fn main() {
   let fotoleine = Fotoleine::init(framework, &display_size, &mut imgui, &event_loop).expect("Couldn't initialize Fotoleine.");
 
   run(event_loop, imgui, fotoleine);
+}
+
+#[derive(Debug)]
+enum FotoleineInitError {
+  ImageDisplayCreationError(image_display::ImageDisplayCreationError),
+  GliumRendererError(imgui_glium_renderer::GliumRendererError),
+}
+
+use std::fmt;
+impl fmt::Display for FotoleineInitError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>)->fmt::Result {
+    use self::FotoleineInitError::*;
+    match self {
+      ImageDisplayCreationError(error) => write!(f, "Couldn't create the image display: {}", error),
+      GliumRendererError(error) => write!(f, "Couldn't reload the font texture: {}", error),
+    }
+  }
+}
+
+impl Error for FotoleineInitError {
+  fn source(&self)->Option<&(dyn Error + 'static)> {
+    use self::FotoleineInitError::*;
+    match self {
+      ImageDisplayCreationError(error) => Some(error),
+      GliumRendererError(_) => None, // glium renderer error doesn't impl Error, :todo:
+    }
+  }
+}
+
+impl From<image_display::ImageDisplayCreationError> for FotoleineInitError {
+  fn from(error: image_display::ImageDisplayCreationError)->Self {
+    FotoleineInitError::ImageDisplayCreationError(error)
+  }
+}
+
+impl From<imgui_glium_renderer::GliumRendererError> for FotoleineInitError {
+  fn from(error: imgui_glium_renderer::GliumRendererError)->Self {
+    FotoleineInitError::GliumRendererError(error)
+  }
 }

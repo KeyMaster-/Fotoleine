@@ -1,5 +1,4 @@
 use std::error::Error;
-use std::fmt;
 use std::io;
 use std::path::Path;
 use glium::{
@@ -163,6 +162,7 @@ pub enum ImageLoadError {
   ExifError(exif::Error)
 }
 
+use std::fmt;
 impl fmt::Display for ImageLoadError {
   fn fmt(&self, f: &mut fmt::Formatter<'_>)->fmt::Result {
     use self::ImageLoadError::*;

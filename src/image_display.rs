@@ -2,6 +2,7 @@ use std::error::Error;
 use glium::{
   Display, Frame, Surface,
   VertexBuffer,
+  Program,
   index::{NoIndices, PrimitiveType},
   implement_vertex, uniform, uniforms::{MinifySamplerFilter, MagnifySamplerFilter}
 };
@@ -23,7 +24,7 @@ pub struct ImageDisplay {
 }
 
 impl ImageDisplay {
-  pub fn new(display: &Display, display_size: &LogicalSize)->Result<ImageDisplay, Box<dyn Error>> { //:todo: custom error
+  pub fn new(display: &Display, display_size: &LogicalSize)->Result<ImageDisplay, ImageDisplayCreationError> { //:todo: custom error
     let vertex_buffer = VertexBuffer::empty_dynamic(display, 4)?;
     let index_buffer  = NoIndices(PrimitiveType::TriangleStrip);
 
@@ -55,7 +56,7 @@ impl ImageDisplay {
       }
     "#;
 
-    let program = glium::Program::from_source(display, vertex_shader_src, fragment_shader_src, None)?;
+    let program = Program::from_source(display, vertex_shader_src, fragment_shader_src, None)?;
 
     let mut image_display = ImageDisplay {
       program,
@@ -93,4 +94,43 @@ fn display_to_gl(display_size: &LogicalSize)->[[f32; 4]; 4] {
    [ 0.0, -2.0 / display_size.height as f32, 0.0, 0.0],
    [ 0.0,  0.0, 1.0, 0.0],
    [-1.0,  1.0, 0.0, 1.0f32]]
+}
+
+#[derive(Debug)]
+pub enum ImageDisplayCreationError {
+  BufferCreationError(glium::vertex::BufferCreationError),
+  ProgramCreationError(glium::program::ProgramCreationError),
+}
+
+use std::fmt;
+impl fmt::Display for ImageDisplayCreationError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>)->fmt::Result {
+    use self::ImageDisplayCreationError::*;
+    match self {
+      BufferCreationError(error) => write!(f, "Could not create buffer: {}", error),
+      ProgramCreationError(error) => write!(f, "Could not compile shader program: {}", error),
+    }
+  }
+}
+
+impl Error for ImageDisplayCreationError {
+  fn source(&self)->Option<&(dyn Error + 'static)> {
+    use self::ImageDisplayCreationError::*;
+    match self {
+      BufferCreationError(error) => Some(error),
+      ProgramCreationError(error) => Some(error),
+    }
+  }
+}
+
+impl From<glium::vertex::BufferCreationError> for ImageDisplayCreationError {
+  fn from(error: glium::vertex::BufferCreationError)->Self {
+    ImageDisplayCreationError::BufferCreationError(error)
+  }
+}
+
+impl From<glium::program::ProgramCreationError> for ImageDisplayCreationError {
+  fn from(error: glium::program::ProgramCreationError)->Self {
+    ImageDisplayCreationError::ProgramCreationError(error)
+  }
 }
