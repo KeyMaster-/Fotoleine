@@ -187,6 +187,11 @@ impl Program for Fotoleine {
           println!("Couldn't open file {}, error {}", path.to_string_lossy(), err);
         }
       }
+
+      if ui.is_key_pressed(VirtualKeyCode::P as _) {
+        let path = loaded_dir.path_at(loaded_dir.shown_idx());
+        println!("Current shown image is at {}", path.to_string_lossy());
+      }
     }
 
     self.build_ui(&mut ui);
