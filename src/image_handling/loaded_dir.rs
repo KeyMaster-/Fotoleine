@@ -69,6 +69,10 @@ impl LoadedDir {
     self.shown_idx
   }
 
+  pub fn image_count(&self)->usize {
+    self.entries.len()
+  }
+
   pub fn offset_idx(&self, offset: i32)->usize {
     offset_idx(self.shown_idx, self.entries.len(), offset)
   }

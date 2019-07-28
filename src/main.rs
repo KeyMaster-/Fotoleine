@@ -18,6 +18,8 @@ mod image_handling;
 mod image_display;
 mod worker_pool;
 
+const INVIS_WINDOW_FLAGS: ImGuiWindowFlags = ImGuiWindowFlags::from_bits_truncate(ImGuiWindowFlags::NoBackground.bits() | ImGuiWindowFlags::NoDecoration.bits() | ImGuiWindowFlags::NoInputs.bits() | ImGuiWindowFlags::NoSavedSettings.bits());
+
 struct Fotoleine {
   framework: Framework,
   image_handling: ImageHandling,
@@ -44,6 +46,28 @@ impl Fotoleine {
   }
 
   fn build_ui(&mut self, ui:&mut Ui) {
+    ui.window(im_str!("overlay"))
+      .flags(INVIS_WINDOW_FLAGS)
+      .position([0.0, 0.0], Condition::Always)
+      .size([self.view_area_size.width as f32, self.view_area_size.height as f32], Condition::Always) // :todo: currently assumes view area size is full screen size
+      .build(|| {
+
+          // image index in folder
+        {
+          if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
+            let image_count = loaded_dir.image_count();
+            let shown_idx = loaded_dir.shown_idx();
+            let count_str = format!("{}", image_count);
+              // idx gets padded to a width that matches that of the maximum count, right-aligned, with spaces
+            let text = ImString::new(format!("{idx: >width$}/{count}", idx = shown_idx, width = count_str.len(), count = count_str));
+            let text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
+
+            let padding = 10.0;
+            ui.set_cursor_pos([(self.view_area_size.width as f32) - text_size[0] - padding, (self.view_area_size.height as f32) - text_size[1] - padding]);
+            ui.text(text);
+          }
+        }
+      });
   }
 }
 
@@ -94,11 +118,6 @@ impl Program for Fotoleine {
             if let Err(load_error) = load_res {
               println!("Couldn't load path {}: {}", path.to_string_lossy(), load_error);
             } 
-            // else {
-            //   if let Some(ref mut loaded_dir) = self.image_handling.loaded_dir {
-            //     loaded_dir.set_shown(0, &self.image_handling.services);
-            //   }
-            // }
           },
           WindowEvent::Resized(size) => {
             self.view_area_size = size.clone();
