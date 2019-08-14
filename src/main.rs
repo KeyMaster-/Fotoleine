@@ -26,6 +26,7 @@ struct Fotoleine {
   image_handling: ImageHandling,
   image_display: ImageDisplay,
   view_area_size: LogicalSize,
+  show_ui: bool
 }
 
 impl Fotoleine {
@@ -56,6 +57,7 @@ impl Fotoleine {
       image_handling,
       image_display,
       view_area_size: display_size.clone(),
+      show_ui: true
     })
   }
 
@@ -69,29 +71,31 @@ impl Fotoleine {
       .size([self.view_area_size.width as f32, self.view_area_size.height as f32], Condition::Always) // :todo: currently assumes view area size is full screen size
       .build(|| {
         if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
-          // image index in folder
-          {
-            let image_count = loaded_dir.image_count();
-            let shown_idx = loaded_dir.shown_idx() + 1;
-            let count_str = format!("{}", image_count);
-              // idx gets padded to a width that matches that of the maximum count, right-aligned, with spaces
-            let text = ImString::new(format!("{}/{}", shown_idx, count_str));
-            let text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
-
-            let position_padding = 10.0;
-            let text_tl = [(self.view_area_size.width as f32) - text_size[0] - position_padding, (self.view_area_size.height as f32) - text_size[1] - position_padding];
-            let text_br = [text_tl[0] + text_size[0], text_tl[1] + text_size[1]];
-
-            // draw backing darkening rectangle, for contrast
+          if self.show_ui {
+            // image index in folder
             {
-              let padding = text_size[1] * 0.1;
-              let draw_list = ui.get_window_draw_list();
-              draw_list.add_rect([text_tl[0] - padding, text_tl[1] - padding], [text_br[0] + padding, text_br[1] + padding], (0.1, 0.1, 0.1, 0.5))
-                .filled(true)
-                .build();
+              let image_count = loaded_dir.image_count();
+              let shown_idx = loaded_dir.shown_idx() + 1;
+              let count_str = format!("{}", image_count);
+                // idx gets padded to a width that matches that of the maximum count, right-aligned, with spaces
+              let text = ImString::new(format!("{}/{}", shown_idx, count_str));
+              let text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
+
+              let position_padding = 10.0;
+              let text_tl = [(self.view_area_size.width as f32) - text_size[0] - position_padding, (self.view_area_size.height as f32) - text_size[1] - position_padding];
+              let text_br = [text_tl[0] + text_size[0], text_tl[1] + text_size[1]];
+
+              // draw backing darkening rectangle, for contrast
+              {
+                let padding = text_size[1] * 0.1;
+                let draw_list = ui.get_window_draw_list();
+                draw_list.add_rect([text_tl[0] - padding, text_tl[1] - padding], [text_br[0] + padding, text_br[1] + padding], (0.1, 0.1, 0.1, 0.5))
+                  .filled(true)
+                  .build();
+              }
+              ui.set_cursor_pos(text_tl);
+              ui.text(text);
             }
-            ui.set_cursor_pos(text_tl);
-            ui.text(text);
           }
 
           {
@@ -232,6 +236,10 @@ impl Program for Fotoleine {
       if ui.is_key_pressed(VirtualKeyCode::P as _) {
         let path = loaded_dir.path_at(loaded_dir.shown_idx());
         println!("Current shown image is at {}", path.display());
+      }
+
+      if ui.is_key_pressed(VirtualKeyCode::U as _) {
+        self.show_ui = !self.show_ui;
       }
     }
 
