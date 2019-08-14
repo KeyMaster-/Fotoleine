@@ -40,10 +40,12 @@ impl LoadedDir {
     let path = path.to_path_buf().into_boxed_path();
     let dir_iter = fs::read_dir(&path)?;
 
-    let entries: Vec<_> = dir_iter
+    let mut entries: Vec<_> = dir_iter
       .filter_map(|entry_res| entry_res.ok())
       .filter(|entry| file_is_relevant(entry))
       .collect();
+
+    entries.sort_unstable_by_key(|entry| entry.file_name());
 
     let loaded_images = HashMap::with_capacity(services.loading_policy.max_loaded_image_count());
     let pending_loads = HashSet::new();
