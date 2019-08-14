@@ -32,7 +32,7 @@ impl Fotoleine {
   fn init(mut framework: Framework, display_size: &LogicalSize, imgui: &mut Context, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, FotoleineInitError> {
     let image_display = ImageDisplay::new(&framework.display, display_size)?;
       // 2 images on either side of shown that can be flicked between without triggering loads. 
-      // keep 2 images behind the buffer zone
+      // keep 2 images before the buffer zone
       // load the next 5 images after the buffer zone
       //   For a total of 1 + 2 * 2 + 2 + 5 = 12 loaded images at any time
       // have 4 worker threads
@@ -61,6 +61,8 @@ impl Fotoleine {
 
   fn build_ui(&mut self, ui:&mut Ui) {
     let _font = ui.push_font(self.font);
+      // disable anything messing with the window drawing area, such that the UI window actually covers the entire drawing area
+    let _window_border = ui.push_style_vars(&[StyleVar::WindowBorderSize(0.0), StyleVar::WindowRounding(0.0), StyleVar::WindowPadding([0.0, 0.0])]);
     ui.window(im_str!("overlay"))
       .flags(INVIS_WINDOW_FLAGS)
       .position([0.0, 0.0], Condition::Always)
@@ -70,14 +72,25 @@ impl Fotoleine {
           // image index in folder
           {
             let image_count = loaded_dir.image_count();
-            let shown_idx = loaded_dir.shown_idx();
+            let shown_idx = loaded_dir.shown_idx() + 1;
             let count_str = format!("{}", image_count);
               // idx gets padded to a width that matches that of the maximum count, right-aligned, with spaces
-            let text = ImString::new(format!("{idx: >width$}/{count}", idx = shown_idx, width = count_str.len(), count = count_str));
+            let text = ImString::new(format!("{}/{}", shown_idx, count_str));
             let text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
 
-            let padding = 10.0;
-            ui.set_cursor_pos([(self.view_area_size.width as f32) - text_size[0] - padding, (self.view_area_size.height as f32) - text_size[1] - padding]);
+            let position_padding = 10.0;
+            let text_tl = [(self.view_area_size.width as f32) - text_size[0] - position_padding, (self.view_area_size.height as f32) - text_size[1] - position_padding];
+            let text_br = [text_tl[0] + text_size[0], text_tl[1] + text_size[1]];
+
+            // draw backing darkening rectangle, for contrast
+            {
+              let padding = text_size[1] * 0.1;
+              let draw_list = ui.get_window_draw_list();
+              draw_list.add_rect([text_tl[0] - padding, text_tl[1] - padding], [text_br[0] + padding, text_br[1] + padding], (0.1, 0.1, 0.1, 0.5))
+                .filled(true)
+                .build();
+            }
+            ui.set_cursor_pos(text_tl);
             ui.text(text);
           }
 
@@ -144,7 +157,7 @@ impl Program for Fotoleine {
           WindowEvent::DroppedFile(path) => {
             let load_res = self.image_handling.load_path(&path);
             if let Err(load_error) = load_res {
-              println!("Couldn't load path {}: {}", path.to_string_lossy(), load_error);
+              println!("Couldn't load path {}: {}", path.display(), load_error);
             } 
           },
           WindowEvent::Resized(size) => {
@@ -200,7 +213,7 @@ impl Program for Fotoleine {
       }
 
       if let Some(ref mut placed_image) = loaded_dir.image_at_mut(loaded_dir.shown_idx()) {
-        placed_image.place_to_fit(&self.view_area_size, 20.0);
+        placed_image.place_to_fit(&self.view_area_size, 0.0);
       };
 
       if ui.is_key_pressed(VirtualKeyCode::O as _) {
@@ -212,13 +225,13 @@ impl Program for Fotoleine {
           .output();
 
         if let Err(err) = open_res {
-          println!("Couldn't open file {}, error {}", path.to_string_lossy(), err);
+          println!("Couldn't open file {}, error {}", path.display(), err);
         }
       }
 
       if ui.is_key_pressed(VirtualKeyCode::P as _) {
         let path = loaded_dir.path_at(loaded_dir.shown_idx());
-        println!("Current shown image is at {}", path.to_string_lossy());
+        println!("Current shown image is at {}", path.display());
       }
     }
 

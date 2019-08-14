@@ -145,8 +145,8 @@ impl PlacedImage {
   pub fn place_to_fit(&mut self, size: &LogicalSize, padding: f64) {
     let rotated_size = self.image.rotated_size();
 
-    let x_scale = size.width / ((rotated_size[0] as f64) + padding);
-    let y_scale = size.height / ((rotated_size[1] as f64) + padding);
+    let x_scale = (size.width - padding) / (rotated_size[0] as f64);
+    let y_scale = (size.height - padding) / (rotated_size[1] as f64);
     self.scale = x_scale.min(y_scale);
 
     self.pos.x = size.width / 2.0;
