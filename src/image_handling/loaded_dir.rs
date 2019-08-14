@@ -9,7 +9,6 @@ use glium::texture::TextureCreationError;
 use crate::image::{self, ImageTexture, PlacedImage};
 use super::ImageHandlingServices;
 
-
   // A loaded directory of images we want to display
 pub struct LoadedDir {
   path: Box<Path>,
@@ -20,6 +19,8 @@ pub struct LoadedDir {
   shown_idx: usize,
 
   pending_loads: HashSet<usize>,
+
+  ratings: HashMap<String, Rating>
 }
 
 fn offset_idx(idx: usize, max: usize, offset: i32)->usize {
@@ -53,6 +54,8 @@ impl LoadedDir {
     let shown_idx = 0;
     let load_pivot = 0;
 
+    let ratings = HashMap::new();
+
     let mut loaded_dir = LoadedDir {
       path,
       entries,
@@ -60,6 +63,7 @@ impl LoadedDir {
       load_pivot,
       shown_idx,
       pending_loads,
+      ratings,
     };
 
     loaded_dir.update_loaded(services);
@@ -95,6 +99,38 @@ impl LoadedDir {
     self.shown_idx = idx;
 
     self.update_loaded(services);
+  }
+
+  fn file_name_string(&self, idx: usize)->Option<String> {
+    let file_name_res = self.entries[idx].file_name().into_string();
+    if let Err(_) = file_name_res {
+      println!("File {} does not have a unicode filename.", self.path_at(idx).display());
+      None
+    } else {
+      Some(file_name_res.unwrap())
+    }
+  }
+
+  pub fn set_rating(&mut self, idx: usize, rating: Rating) {
+    if let Some(file_name) = self.file_name_string(idx) {
+      if let Rating::Low = rating {
+        self.ratings.remove(&file_name);
+      } else {
+        self.ratings.insert(file_name, rating);
+      }
+    }
+  }
+
+  pub fn get_rating(&self, idx: usize)->Option<Rating> {
+    if let Some(file_name) = self.file_name_string(idx) {
+      if let Some(rating) = self.ratings.get(&file_name) {
+        Some(*rating)
+      } else {
+        Some(Rating::Low)
+      }
+    } else {
+      None
+    }
   }
 
   fn update_loaded(&mut self, services: &ImageHandlingServices) {
@@ -142,6 +178,34 @@ impl LoadedDir {
     } else {
       println!("loader pool output channel closed!");
       Ok(())
+    }
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Rating {
+  High,
+  Medium,
+  Low
+}
+
+impl Rating {
+  fn from_u8(val: u8)->Rating {
+    let limited = val.min(2); // limit to [0, 2] range
+    if limited == 0 {
+      Rating::Low
+    } else if limited == 1 {
+      Rating::Medium
+    } else {
+      Rating::High
+    }
+  }
+
+  fn to_u8(&self)->u8 {
+    match self {
+      Rating::Low => 0,
+      Rating::Medium => 1,
+      Rating::High => 2
     }
   }
 }

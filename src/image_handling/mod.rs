@@ -6,6 +6,7 @@ use glium::glutin::event_loop::EventLoop;
 
 mod loaded_dir;
 pub mod loader_pool;
+pub use loaded_dir::Rating;
 
 pub struct ImageHandling {
   pub services: ImageHandlingServices,

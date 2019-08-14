@@ -10,7 +10,7 @@ use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
 use glium::glutin::dpi::LogicalSize;
 use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
 use image_display::ImageDisplay;
-use image_handling::{ImageHandling, loader_pool::LoadNotification};
+use image_handling::{ImageHandling, loader_pool::LoadNotification, Rating};
 
 mod support;
 mod image;
@@ -26,6 +26,7 @@ struct Fotoleine {
   image_handling: ImageHandling,
   image_display: ImageDisplay,
   view_area_size: LogicalSize,
+  bg_col: [f32; 3],
   show_ui: bool
 }
 
@@ -57,6 +58,7 @@ impl Fotoleine {
       image_handling,
       image_display,
       view_area_size: display_size.clone(),
+      bg_col: [0.1, 0.1, 0.1],
       show_ui: true
     })
   }
@@ -72,29 +74,59 @@ impl Fotoleine {
       .build(|| {
         if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
           if self.show_ui {
-            // image index in folder
+            let position_padding = 10.0;
+
+              // image index in folder
+            let image_count = loaded_dir.image_count();
+            let shown_idx = loaded_dir.shown_idx() + 1;
+            let count_str = format!("{}", image_count);
+              // idx gets padded to a width that matches that of the maximum count, right-aligned, with spaces
+            let text = ImString::new(format!("{}/{}", shown_idx, count_str));
+            let text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
+            
+            let text_tl = [(self.view_area_size.width as f32) - text_size[0] - position_padding, (self.view_area_size.height as f32) - text_size[1] - position_padding];
+            let text_br = [text_tl[0] + text_size[0], text_tl[1] + text_size[1]];
+
+            // draw backing darkening rectangle, for contrast
             {
-              let image_count = loaded_dir.image_count();
-              let shown_idx = loaded_dir.shown_idx() + 1;
-              let count_str = format!("{}", image_count);
-                // idx gets padded to a width that matches that of the maximum count, right-aligned, with spaces
-              let text = ImString::new(format!("{}/{}", shown_idx, count_str));
-              let text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
+              let padding = text_size[1] * 0.1;
+              let draw_list = ui.get_window_draw_list();
+              draw_list.add_rect([text_tl[0] - padding, text_tl[1] - padding], [text_br[0] + padding, text_br[1] + padding], [self.bg_col[0], self.bg_col[1], self.bg_col[2], 0.5])
+                .filled(true)
+                .build();
+            }
+            ui.set_cursor_pos(text_tl);
+            ui.text(text);
 
-              let position_padding = 10.0;
-              let text_tl = [(self.view_area_size.width as f32) - text_size[0] - position_padding, (self.view_area_size.height as f32) - text_size[1] - position_padding];
-              let text_br = [text_tl[0] + text_size[0], text_tl[1] + text_size[1]];
+            // Rating indicator
+            if let Some(rating) = loaded_dir.get_rating(loaded_dir.shown_idx()) {
+              let rating_number = match rating {
+                Rating::Low => 0,
+                Rating::Medium => 1,
+                Rating::High => 2
+              };
 
-              // draw backing darkening rectangle, for contrast
+              let line_width = 50.0;
+              let line_spacing = 20.0;
+
               {
-                let padding = text_size[1] * 0.1;
+                let line_right = self.view_area_size.width as f32 - position_padding;
+                let line_left =  line_right - line_width;
+
                 let draw_list = ui.get_window_draw_list();
-                draw_list.add_rect([text_tl[0] - padding, text_tl[1] - padding], [text_br[0] + padding, text_br[1] + padding], (0.1, 0.1, 0.1, 0.5))
-                  .filled(true)
-                  .build();
+                for i in 0..=2 {
+                  let line_height = text_tl[1] - position_padding - i as f32 * line_spacing;
+
+                  let colour = if rating_number == i {
+                    [1.0, 1.0, 1.0, 1.0]
+                  } else {
+                    [0.5, 0.5, 0.5, 1.0]
+                  };
+
+                  draw_list.add_line([line_left, line_height], [line_right, line_height], colour)
+                    .build();
+                }
               }
-              ui.set_cursor_pos(text_tl);
-              ui.text(text);
             }
           }
 
@@ -241,6 +273,14 @@ impl Program for Fotoleine {
       if ui.is_key_pressed(VirtualKeyCode::U as _) {
         self.show_ui = !self.show_ui;
       }
+
+      if ui.is_key_pressed(VirtualKeyCode::Key1 as _) {
+        loaded_dir.set_rating(loaded_dir.shown_idx(), Rating::Low);
+      } else if ui.is_key_pressed(VirtualKeyCode::Key2 as _) {
+        loaded_dir.set_rating(loaded_dir.shown_idx(), Rating::Medium)
+      } else if ui.is_key_pressed(VirtualKeyCode::Key3 as _) {
+        loaded_dir.set_rating(loaded_dir.shown_idx(), Rating::High)
+      }
     }
 
     self.build_ui(&mut ui);
@@ -248,7 +288,7 @@ impl Program for Fotoleine {
     let draw_data = end_frame(ui, &self.framework.platform, &self.framework.display);
 
     let mut target = self.framework.display.draw();
-    target.clear_color_srgb(0.1, 0.1, 0.1, 1.0);
+    target.clear_color_srgb(self.bg_col[0], self.bg_col[1], self.bg_col[2], 1.0);
 
     if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
       if let Some(ref placed_image) = loaded_dir.image_at(loaded_dir.shown_idx()) {
