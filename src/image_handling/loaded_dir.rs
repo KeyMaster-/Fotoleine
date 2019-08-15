@@ -101,35 +101,27 @@ impl LoadedDir {
     self.update_loaded(services);
   }
 
-  fn file_name_string(&self, idx: usize)->Option<String> {
-    let file_name_res = self.entries[idx].file_name().into_string();
-    if let Err(_) = file_name_res {
-      println!("File {} does not have a unicode filename.", self.path_at(idx).display());
-      None
-    } else {
-      Some(file_name_res.unwrap())
-    }
+  fn file_name_string(&self, idx: usize)->String {
+    self.entries[idx].file_name().into_string().unwrap() // the image filter removes any entries which don't have a rust-string-representable filename
   }
 
   pub fn set_rating(&mut self, idx: usize, rating: Rating) {
-    if let Some(file_name) = self.file_name_string(idx) {
-      if let Rating::Low = rating {
-        self.ratings.remove(&file_name);
-      } else {
-        self.ratings.insert(file_name, rating);
-      }
+    let file_name = self.file_name_string(idx);
+
+    if let Rating::Low = rating {
+      self.ratings.remove(&file_name);
+    } else {
+      self.ratings.insert(file_name, rating);
     }
   }
 
-  pub fn get_rating(&self, idx: usize)->Option<Rating> {
-    if let Some(file_name) = self.file_name_string(idx) {
-      if let Some(rating) = self.ratings.get(&file_name) {
-        Some(*rating)
-      } else {
-        Some(Rating::Low)
-      }
+  pub fn get_rating(&self, idx: usize)->Rating {
+    let file_name = self.file_name_string(idx);
+
+    if let Some(rating) = self.ratings.get(&file_name) {
+      *rating
     } else {
-      None
+      Rating::Low
     }
   }
 
@@ -190,7 +182,7 @@ pub enum Rating {
 }
 
 impl Rating {
-  fn from_u8(val: u8)->Rating {
+  pub fn from_u8(val: u8)->Rating {
     let limited = val.min(2); // limit to [0, 2] range
     if limited == 0 {
       Rating::Low
@@ -201,18 +193,26 @@ impl Rating {
     }
   }
 
-  fn to_u8(&self)->u8 {
+  pub fn to_u8(&self)->u8 {
     match self {
       Rating::Low => 0,
       Rating::Medium => 1,
       Rating::High => 2
     }
   }
+
+  pub fn max()->u8 { return 2; }
 }
 
 fn file_is_relevant(entry:&DirEntry)->bool {
   let path = entry.path();
   if !path.is_file() {
+    return false;
+  }
+
+    // The filename is not representable as a rust string
+    // This is required for saving image ratings
+  if entry.file_name().into_string().is_err() {
     return false;
   }
 

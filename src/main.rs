@@ -74,57 +74,97 @@ impl Fotoleine {
       .build(|| {
         if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
           if self.show_ui {
-            let position_padding = 10.0;
+            let border_padding = 10.0; // distance between the window edge and the border of the backing box
+            let backing_padding_x = 10.0; // distance between the backing box edge and actual content, left and right edge
+            let backing_padding_y = 15.0; // same as above, but top/bottom edge
+            let backing_col = [self.bg_col[0], self.bg_col[1], self.bg_col[2], 0.5];
+            let text_top_adjust = 5.0; // for layout, the top of the text bounding box is moved down by this much.
+            let text_height_adjust = 5.0; // the amount of space to remove from the bottom of the text height, to get better spacing and alignment overall. Necessary since I can't get the text baseline position from imgui
+
+            let rating_line_spacing = 20.0;
 
               // image index in folder
             let image_count = loaded_dir.image_count();
             let shown_idx = loaded_dir.shown_idx() + 1;
             let count_str = format!("{}", image_count);
-              // idx gets padded to a width that matches that of the maximum count, right-aligned, with spaces
+
             let text = ImString::new(format!("{}/{}", shown_idx, count_str));
-            let text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
-            
-            let text_tl = [(self.view_area_size.width as f32) - text_size[0] - position_padding, (self.view_area_size.height as f32) - text_size[1] - position_padding];
-            let text_br = [text_tl[0] + text_size[0], text_tl[1] + text_size[1]];
+            let mut text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
+            text_size[1] -= text_height_adjust + text_top_adjust;
 
-            // draw backing darkening rectangle, for contrast
+            let widest_text = ImString::new(format!("{}/{}", count_str, count_str));
+            let widest_size = ui.calc_text_size(&widest_text, false, -1.0);
+
+              // dimensions of UI drawing area
+            let ui_box_right = self.view_area_size.width as f32 - border_padding - backing_padding_x;
+            let ui_box_left = ui_box_right - widest_size[0];
+            let ui_box_bot = self.view_area_size.height as f32 - border_padding - backing_padding_y;
+            let ui_box_top = ui_box_bot - text_size[1] - backing_padding_y - rating_line_spacing * (Rating::max() as f32);
+
             {
-              let padding = text_size[1] * 0.1;
               let draw_list = ui.get_window_draw_list();
-              draw_list.add_rect([text_tl[0] - padding, text_tl[1] - padding], [text_br[0] + padding, text_br[1] + padding], [self.bg_col[0], self.bg_col[1], self.bg_col[2], 0.5])
-                .filled(true)
-                .build();
-            }
-            ui.set_cursor_pos(text_tl);
-            ui.text(text);
 
-            // Rating indicator
-            if let Some(rating) = loaded_dir.get_rating(loaded_dir.shown_idx()) {
-              let rating_number = match rating {
-                Rating::Low => 0,
-                Rating::Medium => 1,
-                Rating::High => 2
-              };
+              let backing_tl = [ui_box_left - backing_padding_x, ui_box_top - backing_padding_y];
+              let backing_br = [ui_box_right + backing_padding_x, ui_box_bot + backing_padding_y];
+              draw_list.add_rect(backing_tl, backing_br, backing_col).filled(true).build();
 
-              let line_width = 50.0;
-              let line_spacing = 20.0;
+              let text_left = ui_box_left + (ui_box_right - ui_box_left) / 2.0 - text_size[0] / 2.0;
+              let text_top = ui_box_bot - text_size[1];
+              draw_list.add_text([text_left, text_top - text_top_adjust], [1.0, 1.0, 1.0, 1.0], text); // move up by the adjustment amount since the actual visual text is drawn that much further down from the top-left position given to imgui
 
-              {
-                let line_right = self.view_area_size.width as f32 - position_padding;
-                let line_left =  line_right - line_width;
+              let rating_num = loaded_dir.get_rating(loaded_dir.shown_idx()).to_u8();
+              let line_left = ui_box_left;
+              let line_right = ui_box_right;
+              let line_base_height = text_top - backing_padding_y;
+              for i in 0..=Rating::max() {
+                let line_height = line_base_height - i as f32 * rating_line_spacing;
+                let col = if rating_num == i {
+                  [1.0, 1.0, 1.0, 1.0]
+                } else {
+                  [0.8, 0.8, 0.8, 1.0]
+                };
 
-                let draw_list = ui.get_window_draw_list();
-                for i in 0..=2 {
-                  let line_height = text_tl[1] - position_padding - i as f32 * line_spacing;
+                let dashed = rating_num != i;
+                let target_dash_width = 5.0;
+                let dash_gap_ratio = 0.3; // the gap width is the dash width * this ratio
 
-                  let colour = if rating_number == i {
-                    [1.0, 1.0, 1.0, 1.0]
-                  } else {
-                    [0.5, 0.5, 0.5, 1.0]
-                  };
+                let target_stride_width = target_dash_width + target_dash_width * dash_gap_ratio;
 
-                  draw_list.add_line([line_left, line_height], [line_right, line_height], colour)
-                    .build();
+                // the equation we're solving here is:
+                // lw = n * w + (n - 1) * w * r
+                //   where lw is the line width, n is the number of dashes, w is the dash width, and r is the dash gap ratio
+                //   this expresses that the whole line width is covered by n dashes, with gaps after each dash, except for the last dash (we want the last dash to end at the right end of the line)
+
+                // solve for n to get the "exact", decimal number of dashes required to cover lw:
+                // lw = n * w + n * w * r - w * r
+                // lw + w * r = n * (w + w * r)
+                // n = (lw + w * r) / (w + w * r)
+
+                // then we round that number to get to the closest whole number of dashes. 
+                // we'll use that to then solve back to the actual dash width that covers the line width with a whole number of dashes
+                
+                let line_width = line_right - line_left;
+                let n_dashes = ((line_width + target_dash_width * dash_gap_ratio) / target_stride_width).round();
+
+                // to get the dash width, take the original equation, and solve for w (since now we know n)
+                // lw = n * w + (n - 1) * w * r
+                // lw = w * (n + (n - 1) * r)
+                // w = lw / (n + (n - 1) * r)
+                let dash_width = line_width / (n_dashes + (n_dashes - 1.0) * dash_gap_ratio);
+                  // adjust the gap width to make sure it's an integer pixel amount, to have more consistent gap width when drawing.
+                let gap_width = (dash_width * dash_gap_ratio).ceil();
+                let dash_width = (dash_width + dash_width * dash_gap_ratio) - gap_width;
+                let stride_width = dash_width + gap_width;
+
+                if dashed {
+                  for i in 0..(n_dashes as i32) {
+                    let dash_start = line_left + (i as f32) * stride_width;
+                    let dash_end = dash_start + dash_width;
+
+                    draw_list.add_line([dash_start, line_height], [dash_end, line_height], col).build();
+                  }
+                } else {
+                  draw_list.add_line([line_left, line_height], [line_right, line_height], col).build();
                 }
               }
             }
@@ -280,6 +320,10 @@ impl Program for Fotoleine {
         loaded_dir.set_rating(loaded_dir.shown_idx(), Rating::Medium)
       } else if ui.is_key_pressed(VirtualKeyCode::Key3 as _) {
         loaded_dir.set_rating(loaded_dir.shown_idx(), Rating::High)
+      }
+
+      if ui.is_key_pressed(VirtualKeyCode::Key0 as _) {
+        loaded_dir.set_shown(100, &self.image_handling.services);
       }
     }
 
