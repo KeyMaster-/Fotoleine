@@ -13,3 +13,6 @@ imgui-glium-renderer = { version = "0.1.0-pre-glutin", path = "deps/imgui-rs/img
 imgui-winit-support = { version = "0.1.0-pre-glutin", path = "deps/imgui-rs/imgui-winit-support" }
 stb_image = "0.2"
 kamadak-exif = "0.3"
+serde_yaml = "0.8"
+serde = "1.0"
+tempfile = "3.1"

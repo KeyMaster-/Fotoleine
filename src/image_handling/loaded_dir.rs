@@ -1,8 +1,8 @@
 use std::error::Error;
-use std::io;
+use std::io::{self, Write};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::fs::{self, DirEntry};
+use std::fs::{self, File, DirEntry};
 use std::collections::{HashMap, HashSet};
 use glium::backend::Facade;
 use glium::texture::TextureCreationError;
@@ -20,7 +20,7 @@ pub struct LoadedDir {
 
   pending_loads: HashSet<usize>,
 
-  ratings: HashMap<String, Rating>
+  ratings: ImageRatings
 }
 
 fn offset_idx(idx: usize, max: usize, offset: i32)->usize {
@@ -54,7 +54,7 @@ impl LoadedDir {
     let shown_idx = 0;
     let load_pivot = 0;
 
-    let ratings = HashMap::new();
+    let ratings = ImageRatings::new(&path)?;
 
     let mut loaded_dir = LoadedDir {
       path,
@@ -107,22 +107,15 @@ impl LoadedDir {
 
   pub fn set_rating(&mut self, idx: usize, rating: Rating) {
     let file_name = self.file_name_string(idx);
-
-    if let Rating::Low = rating {
-      self.ratings.remove(&file_name);
-    } else {
-      self.ratings.insert(file_name, rating);
+    let save_res = self.ratings.set_rating(file_name, rating);
+    if let Err(error) = save_res {
+      println!("Failed to save ratings: {}", error);
     }
   }
 
   pub fn get_rating(&self, idx: usize)->Rating {
     let file_name = self.file_name_string(idx);
-
-    if let Some(rating) = self.ratings.get(&file_name) {
-      *rating
-    } else {
-      Rating::Low
-    }
+    self.ratings.get_rating(&file_name)
   }
 
   fn update_loaded(&mut self, services: &ImageHandlingServices) {
@@ -174,36 +167,6 @@ impl LoadedDir {
   }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum Rating {
-  High,
-  Medium,
-  Low
-}
-
-impl Rating {
-  pub fn from_u8(val: u8)->Rating {
-    let limited = val.min(2); // limit to [0, 2] range
-    if limited == 0 {
-      Rating::Low
-    } else if limited == 1 {
-      Rating::Medium
-    } else {
-      Rating::High
-    }
-  }
-
-  pub fn to_u8(&self)->u8 {
-    match self {
-      Rating::Low => 0,
-      Rating::Medium => 1,
-      Rating::High => 2
-    }
-  }
-
-  pub fn max()->u8 { return 2; }
-}
-
 fn file_is_relevant(entry:&DirEntry)->bool {
   let path = entry.path();
   if !path.is_file() {
@@ -239,7 +202,8 @@ fn file_is_relevant(entry:&DirEntry)->bool {
 pub enum DirLoadError {
   NotADirectory,
   IoError(io::Error),
-  ImageLoadError(image::ImageLoadError)
+  RatingsLoadError(RatingsLoadError)
+  // ImageLoadError(image::ImageLoadError),
 }
 
 impl fmt::Display for DirLoadError {
@@ -248,7 +212,8 @@ impl fmt::Display for DirLoadError {
     match self {
       NotADirectory => write!(f, "Given path is not a directory"),
       IoError(error) => write!(f, "Could not read directory entries: {}", error),
-      ImageLoadError(error) => write!(f, "Could not load initial image: {}", error),
+      RatingsLoadError(error) => write!(f, "Could not load the ratings file: {}", error)
+      // ImageLoadError(error) => write!(f, "Could not load initial image: {}", error),
     }
   }
 }
@@ -259,7 +224,8 @@ impl Error for DirLoadError {
     match self {
       NotADirectory => None,
       IoError(error) => Some(error),
-      ImageLoadError(error) => Some(error)
+      RatingsLoadError(error) => Some(error),
+      // ImageLoadError(error) => Some(error)
     }
   }
 }
@@ -270,8 +236,230 @@ impl From<io::Error> for DirLoadError {
   }
 }
 
-impl From<image::ImageLoadError> for DirLoadError {
-  fn from(error: image::ImageLoadError)->Self {
-    DirLoadError::ImageLoadError(error)
+impl From<RatingsLoadError> for DirLoadError {
+  fn from(error: RatingsLoadError)->Self {
+    DirLoadError::RatingsLoadError(error)
+  }
+}
+
+// impl From<image::ImageLoadError> for DirLoadError {
+//   fn from(error: image::ImageLoadError)->Self {
+//     DirLoadError::ImageLoadError(error)
+//   }
+// }
+
+struct ImageRatings {
+  ratings: HashMap<String, Rating>,
+  folder_path: PathBuf,
+  ratings_file_path: PathBuf,
+}
+
+impl ImageRatings {
+  fn new(folder_path: &Path)->Result<ImageRatings, RatingsLoadError> {
+    let folder_path = folder_path.to_path_buf();
+
+    let mut ratings_file_path = folder_path.clone();
+    ratings_file_path.push("ratings.yaml");
+
+    let ratings = ImageRatings::load_ratings(&ratings_file_path)?;
+
+    Ok(ImageRatings {
+      ratings,
+      folder_path,
+      ratings_file_path,
+    })
+  }
+
+  fn load_ratings(file_path: &Path)->Result<HashMap<String, Rating>, RatingsLoadError> {
+    if !file_path.exists() {
+      return Ok(HashMap::new());
+    }
+
+    if file_path.is_dir() {
+      return Err(RatingsLoadError::PathIsDir);
+    }
+
+    let file = File::open(file_path)?;
+    let mut deser_map: HashMap<String, u8> = serde_yaml::from_reader(file)?;
+    let mut ratings_map = HashMap::with_capacity(deser_map.len());
+    for (k, v) in deser_map.drain() {
+      ratings_map.insert(k, Rating::from_u8(v));
+    }
+
+    Ok(ratings_map)
+  }
+
+  fn set_rating(&mut self, img_name: String, rating: Rating)->Result<(), RatingsSaveError> {
+    if let Rating::Low = rating {
+      self.ratings.remove(&img_name);
+    } else {
+      self.ratings.insert(img_name, rating);
+    }
+
+    self.save_ratings()
+  }
+
+  fn get_rating(&self, img_name: &String)->Rating {
+    if let Some(rating) = self.ratings.get(img_name) {
+      *rating
+    } else {
+      Rating::Low
+    }
+  }
+
+  fn save_ratings(&self)->Result<(), RatingsSaveError> {
+    let ratings_ser = RatingsSerialize { ratings: &self.ratings };
+
+    let s = serde_yaml::to_string(&ratings_ser)?;
+
+    let mut tmp_file = tempfile::NamedTempFile::new_in(&self.folder_path)?;
+    tmp_file.as_file_mut().write(s.as_bytes())?;
+    tmp_file.persist(&self.ratings_file_path)?;
+
+    
+    Ok(())
+  }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Rating {
+  Low,
+  Medium,
+  High,
+}
+
+impl Rating {
+  pub fn from_u8(val: u8)->Rating {
+    let limited = val.min(2); // limit to [0, 2] range
+    if limited == 0 {
+      Rating::Low
+    } else if limited == 1 {
+      Rating::Medium
+    } else {
+      Rating::High
+    }
+  }
+
+  pub fn to_u8(&self)->u8 {
+    match self {
+      Rating::Low => 0,
+      Rating::Medium => 1,
+      Rating::High => 2
+    }
+  }
+
+  pub fn max()->u8 { return 2; }
+}
+
+struct RatingsSerialize<'a> {
+  ratings: &'a HashMap<String, Rating>
+}
+
+use serde::ser::{Serialize, Serializer, SerializeMap};
+
+impl<'a> Serialize for RatingsSerialize<'a> {
+  fn serialize<S>(&self, serializer: S)->Result<S::Ok, S::Error>
+    where S: Serializer
+  {
+    let mut entries: Vec<_> = self.ratings.iter().collect();
+    entries.sort_unstable_by_key(|kv| kv.0);
+
+    let mut map = serializer.serialize_map(Some(entries.len()))?;
+    for (path, rating) in entries {
+      let rating = rating.to_u8();
+      map.serialize_entry(path, &rating)?;
+    }
+    map.end()
+  }
+}
+
+#[derive(Debug)]
+pub enum RatingsSaveError {
+  SerializeError(serde_yaml::Error),
+  WriteError(io::Error),
+  PersistError(tempfile::PersistError)
+}
+
+impl fmt::Display for RatingsSaveError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>)->fmt::Result {
+    use self::RatingsSaveError::*;
+    match self {
+      SerializeError(error) => write!(f, "Could not serialize the ratings map: {}", error),
+      WriteError(error) => write!(f, "Could not write ratings to file: {}", error),
+      PersistError(error) => write!(f, "Could not persist the temporary ratings file: {}", error),
+    }
+  }
+}
+
+impl Error for RatingsSaveError {
+  fn source(&self)->Option<&(dyn Error + 'static)> {
+    use self::RatingsSaveError::*;
+    match self {
+      SerializeError(error) => Some(error),
+      WriteError(error) => Some(error),
+      PersistError(error) => Some(error)
+    }
+  }
+}
+
+impl From<serde_yaml::Error> for RatingsSaveError {
+  fn from(error: serde_yaml::Error)->Self {
+    RatingsSaveError::SerializeError(error)
+  }
+}
+
+impl From<io::Error> for RatingsSaveError {
+  fn from(error: io::Error)->Self {
+    RatingsSaveError::WriteError(error)
+  }
+}
+
+impl From<tempfile::PersistError> for RatingsSaveError {
+  fn from(error: tempfile::PersistError)->Self {
+    RatingsSaveError::PersistError(error)
+  }
+}
+
+
+#[derive(Debug)]
+pub enum RatingsLoadError {
+  PathIsDir,
+  FileOpenError(io::Error),
+  DeserializeError(serde_yaml::Error),
+}
+
+impl fmt::Display for RatingsLoadError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>)->fmt::Result {
+    use self::RatingsLoadError::*;
+    match self {
+      PathIsDir => write!(f, "The path to the image ratings file is a directory."),
+      FileOpenError(error) => write!(f, "Could not open the ratings file: {}", error),
+      DeserializeError(error) => write!(f, "Could not deseralize the contents of the ratings file: {}", error),
+    }
+  }
+}
+
+impl Error for RatingsLoadError {
+  fn source(&self)->Option<&(dyn Error + 'static)> {
+    use self::RatingsLoadError::*;
+    match self {
+      PathIsDir => None,
+      FileOpenError(error) => Some(error),
+      DeserializeError(error) => Some(error)
+    }
+  }
+}
+
+
+
+impl From<io::Error> for RatingsLoadError {
+  fn from(error: io::Error)->Self {
+    RatingsLoadError::FileOpenError(error)
+  }
+}
+
+impl From<serde_yaml::Error> for RatingsLoadError {
+  fn from(error: serde_yaml::Error)->Self {
+    RatingsLoadError::DeserializeError(error)
   }
 }
