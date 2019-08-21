@@ -84,11 +84,11 @@ impl Fotoleine {
             let rating_line_spacing = 20.0;
 
               // image index in folder
-            let image_count = loaded_dir.image_count();
-            let shown_idx = loaded_dir.shown_idx() + 1;
-            let count_str = format!("{}", image_count);
+            let collection_count = loaded_dir.collection_image_count();
+            let collection_idx = loaded_dir.current_collection_idx() + 1;
+            let count_str = format!("{}", collection_count);
 
-            let text = ImString::new(format!("{}/{}", shown_idx, count_str));
+            let text = ImString::new(format!("{}/{}", collection_idx, count_str));
             let mut text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
             text_size[1] -= text_height_adjust + text_top_adjust;
 
@@ -112,7 +112,7 @@ impl Fotoleine {
               let text_top = ui_box_bot - text_size[1];
               draw_list.add_text([text_left, text_top - text_top_adjust], [1.0, 1.0, 1.0, 1.0], text); // move up by the adjustment amount since the actual visual text is drawn that much further down from the top-left position given to imgui
 
-              let rating_num = loaded_dir.get_rating(loaded_dir.shown_idx()).to_u8();
+              let rating_num = loaded_dir.get_current_rating().to_u8();
               let line_left = ui_box_left;
               let line_right = ui_box_right;
               let line_base_height = text_top - backing_padding_y;
@@ -171,7 +171,7 @@ impl Fotoleine {
           }
 
           {
-            if let None = loaded_dir.image_at(loaded_dir.shown_idx()) {
+            if let None = loaded_dir.current_image() {
               let text = im_str!("Image loading...");
               let text_size = ui.calc_text_size(&text, false, -1.0); // :todo: move out text alignment utilities into a function & module
               ui.set_cursor_pos([(self.view_area_size.width as f32) / 2.0 - text_size[0] / 2.0, (self.view_area_size.height as f32) / 2.0 - text_size[1] / 2.0]);
@@ -283,17 +283,17 @@ impl Program for Fotoleine {
 
     if let Some(ref mut loaded_dir) = self.image_handling.loaded_dir {
       if ui.is_key_pressed(VirtualKeyCode::A as _) {
-        loaded_dir.set_shown(loaded_dir.offset_idx(-1), &self.image_handling.services);
+        loaded_dir.offset_current(-1, &self.image_handling.services);
       } else if ui.is_key_pressed(VirtualKeyCode::D as _) {
-        loaded_dir.set_shown(loaded_dir.offset_idx( 1), &self.image_handling.services);
+        loaded_dir.offset_current( 1, &self.image_handling.services);
       }
 
-      if let Some(ref mut placed_image) = loaded_dir.image_at_mut(loaded_dir.shown_idx()) {
+      if let Some(ref mut placed_image) = loaded_dir.current_image_mut() {
         placed_image.place_to_fit(&self.view_area_size, 0.0);
       };
 
       if ui.is_key_pressed(VirtualKeyCode::O as _) {
-        let mut path = loaded_dir.path_at(loaded_dir.shown_idx());
+        let mut path = loaded_dir.current_path();
         path.set_extension("cr2");
 
         let open_res = Command::new("open")
@@ -306,7 +306,7 @@ impl Program for Fotoleine {
       }
 
       if ui.is_key_pressed(VirtualKeyCode::P as _) {
-        let path = loaded_dir.path_at(loaded_dir.shown_idx());
+        let path = loaded_dir.current_path();
         println!("Current shown image is at {}", path.display());
       }
 
@@ -314,16 +314,26 @@ impl Program for Fotoleine {
         self.show_ui = !self.show_ui;
       }
 
-      if ui.is_key_pressed(VirtualKeyCode::Key1 as _) {
-        loaded_dir.set_rating(loaded_dir.shown_idx(), Rating::Low);
-      } else if ui.is_key_pressed(VirtualKeyCode::Key2 as _) {
-        loaded_dir.set_rating(loaded_dir.shown_idx(), Rating::Medium)
-      } else if ui.is_key_pressed(VirtualKeyCode::Key3 as _) {
-        loaded_dir.set_rating(loaded_dir.shown_idx(), Rating::High)
+      if ui.is_key_pressed(VirtualKeyCode::Escape as _) {
+        loaded_dir.set_rating_filter(None);
       }
 
-      if ui.is_key_pressed(VirtualKeyCode::Key0 as _) {
-        loaded_dir.set_shown(100, &self.image_handling.services);
+      if ui.io().key_super {
+        if ui.is_key_pressed(VirtualKeyCode::Key1 as _) {
+          loaded_dir.set_rating_filter(Some(Rating::Low));
+        } else if ui.is_key_pressed(VirtualKeyCode::Key2 as _) {
+          loaded_dir.set_rating_filter(Some(Rating::Medium))
+        } else if ui.is_key_pressed(VirtualKeyCode::Key3 as _) {
+          loaded_dir.set_rating_filter(Some(Rating::High))
+        }
+      } else {
+        if ui.is_key_pressed(VirtualKeyCode::Key1 as _) {
+          loaded_dir.set_current_rating(Rating::Low);
+        } else if ui.is_key_pressed(VirtualKeyCode::Key2 as _) {
+          loaded_dir.set_current_rating(Rating::Medium)
+        } else if ui.is_key_pressed(VirtualKeyCode::Key3 as _) {
+          loaded_dir.set_current_rating(Rating::High)
+        }  
       }
     }
 
@@ -335,7 +345,7 @@ impl Program for Fotoleine {
     target.clear_color_srgb(self.bg_col[0], self.bg_col[1], self.bg_col[2], 1.0);
 
     if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
-      if let Some(ref placed_image) = loaded_dir.image_at(loaded_dir.shown_idx()) {
+      if let Some(ref placed_image) = loaded_dir.current_image() {
         self.image_display.draw_image(placed_image, &mut target);
       }
     }

@@ -6,19 +6,20 @@ use std::fs::{self, File, DirEntry};
 use std::collections::{HashMap, HashSet};
 use glium::backend::Facade;
 use glium::texture::TextureCreationError;
-use crate::image::{self, ImageTexture, PlacedImage};
+use crate::image::{ImageTexture, PlacedImage};
 use super::ImageHandlingServices;
 
   // A loaded directory of images we want to display
 pub struct LoadedDir {
-  path: Box<Path>,
-  entries: Vec<DirEntry>,
+  collection: Vec<DirEntry>,
+  name_to_idx: HashMap<String, usize>,
 
-  loaded_images: HashMap<usize, PlacedImage>,
-  load_pivot: usize,
-  shown_idx: usize,
+  active_idxs: Vec<usize>, // List of image indices currently in the list that the user traverses. Indexes into collection
+  load_pivot: usize, // indexes into active_idxs
+  current_idx: usize, // current show image, indexes into active_idxs
 
-  pending_loads: HashSet<usize>,
+  loaded_images: HashMap<usize, PlacedImage>, // all loaded images. keys index into collection
+  pending_loads: HashSet<usize>, // keys index into collection
 
   ratings: ImageRatings
 }
@@ -38,30 +39,39 @@ impl LoadedDir {
       return Err(DirLoadError::NotADirectory);
     }
 
-    let path = path.to_path_buf().into_boxed_path();
-    let dir_iter = fs::read_dir(&path)?;
+    let dir_iter = fs::read_dir(path)?;
 
-    let mut entries: Vec<_> = dir_iter
+    let mut collection: Vec<_> = dir_iter
       .filter_map(|entry_res| entry_res.ok())
-      .filter(|entry| file_is_relevant(entry))
+      .filter(|entry| file_is_relevant(entry)) // filters for JPG files, and guarantees unicode filenames
       .collect();
 
-    entries.sort_unstable_by_key(|entry| entry.file_name());
+    collection.sort_unstable_by_key(|entry| entry.file_name());
+
+    let mut name_to_idx = HashMap::new();
+    for (idx, entry) in collection.iter().enumerate() {
+      let file_name = entry.file_name().into_string().unwrap();
+      name_to_idx.insert(file_name, idx);
+    }
+
+    let active_idxs = (0..collection.len()).collect();
+    let current_idx = 0;
+    let load_pivot = 0;
 
     let loaded_images = HashMap::with_capacity(services.loading_policy.max_loaded_image_count());
     let pending_loads = HashSet::new();
 
-    let shown_idx = 0;
-    let load_pivot = 0;
-
-    let ratings = ImageRatings::new(&path)?;
+    let ratings = ImageRatings::new(&path, &name_to_idx)?;
 
     let mut loaded_dir = LoadedDir {
-      path,
-      entries,
-      loaded_images,
+      collection,
+      name_to_idx,
+      
+      active_idxs,
       load_pivot,
-      shown_idx,
+      current_idx,
+
+      loaded_images,
       pending_loads,
       ratings,
     };
@@ -71,74 +81,92 @@ impl LoadedDir {
     Ok(loaded_dir)
   }
 
-  pub fn shown_idx(&self)->usize {
-    self.shown_idx
-  }
-
-  pub fn image_count(&self)->usize {
-    self.entries.len()
-  }
-
-  pub fn offset_idx(&self, offset: i32)->usize {
-    offset_idx(self.shown_idx, self.entries.len(), offset)
-  }
-
-  pub fn image_at(&self, idx: usize)->Option<&PlacedImage> {
-    self.loaded_images.get(&idx)
-  }
-
-  pub fn image_at_mut(&mut self, idx: usize)->Option<&mut PlacedImage> {
-    self.loaded_images.get_mut(&idx)
-  }
-
-  pub fn path_at(&self, idx: usize)->PathBuf {
-    self.entries[idx].path()
-  }
-
-  pub fn set_shown(&mut self, idx: usize, services: &ImageHandlingServices) {
-    self.shown_idx = idx;
-
+  pub fn offset_current(&mut self, offset: i32, services: &ImageHandlingServices) {
+    self.current_idx = offset_idx(self.current_idx, self.active_idxs.len(), offset);
     self.update_loaded(services);
   }
 
-  fn file_name_string(&self, idx: usize)->String {
-    self.entries[idx].file_name().into_string().unwrap() // the image filter removes any entries which don't have a rust-string-representable filename
+  pub fn current_collection_idx(&self)->usize {
+    self.collection_idx(self.current_idx)
   }
 
-  pub fn set_rating(&mut self, idx: usize, rating: Rating) {
-    let file_name = self.file_name_string(idx);
+  fn collection_idx(&self, idx: usize)->usize {
+    self.active_idxs[idx]
+  }
+
+  pub fn collection_image_count(&self)->usize {
+    self.collection.len()
+  }
+
+  pub fn current_image(&self)->Option<&PlacedImage> {
+    self.loaded_images.get(&self.current_collection_idx())
+  }
+
+  pub fn current_image_mut(&mut self)->Option<&mut PlacedImage> {
+    self.loaded_images.get_mut(&self.current_collection_idx())
+  }
+
+  pub fn current_path(&self)->PathBuf {
+    self.collection[self.current_collection_idx()].path()
+  }
+
+  fn file_name_string(&self, coll_idx: usize)->String {
+    self.collection[coll_idx].file_name().into_string().unwrap() // the image filter removes any entries which don't have a rust-string-representable filename
+  }
+
+  pub fn set_current_rating(&mut self, rating: Rating) {
+    let file_name = self.file_name_string(self.current_collection_idx());
     let save_res = self.ratings.set_rating(file_name, rating);
     if let Err(error) = save_res {
       println!("Failed to save ratings: {}", error);
     }
   }
 
-  pub fn get_rating(&self, idx: usize)->Rating {
-    let file_name = self.file_name_string(idx);
+  pub fn get_current_rating(&self)->Rating {
+    let file_name = self.file_name_string(self.current_collection_idx());
     self.ratings.get_rating(&file_name)
   }
 
+  pub fn set_rating_filter(&mut self, rating: Option<Rating>) {
+    if let Some(rating) = rating {
+      let file_names = self.ratings.filter_ratings(rating);
+      let mut idxs: Vec<_> = file_names.iter().filter_map(|&file_name| self.name_to_idx.get(file_name)).collect();
+      idxs.sort_unstable();
+
+      println!("{:?}", idxs);
+    }
+  }
+
   fn update_loaded(&mut self, services: &ImageHandlingServices) {
-    let (new_pivot, load_range) = services.loading_policy.get_load_range(self.load_pivot, self.shown_idx, self.entries.len());
+    let (new_pivot, load_set) = services.loading_policy.get_load_set(self.load_pivot, self.current_idx, self.active_idxs.len());
     self.load_pivot = new_pivot;
 
-    self.loaded_images.retain(|key, _| load_range.contains(key));
+    let load_coll_idxs: Vec<_> = load_set.iter().map(|&idx| self.collection_idx(idx)).collect();
+    
+    self.loaded_images.retain(|&key, _| {
+      for &idx in &load_coll_idxs {
+        if idx == key {
+          return true;
+        }
+      }
+      return false;
+    });
 
-    for idx in load_range {
-      if self.needs_load(idx) {
-        self.submit_load_request(idx, services);
+    for coll_idx in load_coll_idxs {
+      if self.needs_load(coll_idx) {
+        self.submit_load_request(coll_idx, services);
       }
     }
   }
 
-  fn needs_load(&self, idx: usize)->bool {
-    !self.loaded_images.contains_key(&idx) && !self.pending_loads.contains(&idx)
+  fn needs_load(&self, coll_idx: usize)->bool {
+    !self.loaded_images.contains_key(&coll_idx) && !self.pending_loads.contains(&coll_idx)
   }
 
-  fn submit_load_request(&mut self, idx: usize, services: &ImageHandlingServices) {
-    let path = self.entries[idx].path();
-    self.pending_loads.insert(idx);
-    services.loader_pool.submit((path, idx));
+  fn submit_load_request(&mut self, coll_idx: usize, services: &ImageHandlingServices) {
+    let path = self.collection[coll_idx].path();
+    self.pending_loads.insert(coll_idx);
+    services.loader_pool.submit((path, coll_idx));
   }
 
   pub fn receive_image<F: Facade>(&mut self, services: &ImageHandlingServices, gl_ctx: &F)->Result<(), TextureCreationError> {
@@ -202,8 +230,7 @@ fn file_is_relevant(entry:&DirEntry)->bool {
 pub enum DirLoadError {
   NotADirectory,
   IoError(io::Error),
-  RatingsLoadError(RatingsLoadError)
-  // ImageLoadError(image::ImageLoadError),
+  RatingsLoadError(RatingsLoadError),
 }
 
 impl fmt::Display for DirLoadError {
@@ -212,8 +239,7 @@ impl fmt::Display for DirLoadError {
     match self {
       NotADirectory => write!(f, "Given path is not a directory"),
       IoError(error) => write!(f, "Could not read directory entries: {}", error),
-      RatingsLoadError(error) => write!(f, "Could not load the ratings file: {}", error)
-      // ImageLoadError(error) => write!(f, "Could not load initial image: {}", error),
+      RatingsLoadError(error) => write!(f, "Could not load the ratings file: {}", error),
     }
   }
 }
@@ -225,7 +251,6 @@ impl Error for DirLoadError {
       NotADirectory => None,
       IoError(error) => Some(error),
       RatingsLoadError(error) => Some(error),
-      // ImageLoadError(error) => Some(error)
     }
   }
 }
@@ -242,86 +267,54 @@ impl From<RatingsLoadError> for DirLoadError {
   }
 }
 
-// impl From<image::ImageLoadError> for DirLoadError {
-//   fn from(error: image::ImageLoadError)->Self {
-//     DirLoadError::ImageLoadError(error)
-//   }
-// }
-
 struct ImageRatings {
-  ratings: HashMap<String, Rating>,
+  ratings_data: RatingsData,
   folder_path: PathBuf,
   ratings_file_path: PathBuf,
 }
 
 impl ImageRatings {
-  fn new(folder_path: &Path)->Result<ImageRatings, RatingsLoadError> {
+    // the HashMap would ideally be a HashSet, but there doesn't seem to be an easy way to pretend it is one
+  fn new<V>(folder_path: &Path, known_images: &HashMap<String, V>)->Result<ImageRatings, RatingsLoadError> {
     let folder_path = folder_path.to_path_buf();
 
     let mut ratings_file_path = folder_path.clone();
     ratings_file_path.push("ratings.yaml");
 
-    let ratings = ImageRatings::load_ratings(&ratings_file_path)?;
+    let ratings_data = RatingsData::load(&ratings_file_path, known_images)?;
 
     Ok(ImageRatings {
-      ratings,
+      ratings_data,
       folder_path,
       ratings_file_path,
     })
   }
 
-  fn load_ratings(file_path: &Path)->Result<HashMap<String, Rating>, RatingsLoadError> {
-    if !file_path.exists() {
-      return Ok(HashMap::new());
-    }
-
-    if file_path.is_dir() {
-      return Err(RatingsLoadError::PathIsDir);
-    }
-
-    let file = File::open(file_path)?;
-    let mut deser_map: HashMap<String, u8> = serde_yaml::from_reader(file)?;
-    let mut ratings_map = HashMap::with_capacity(deser_map.len());
-    for (k, v) in deser_map.drain() {
-      ratings_map.insert(k, Rating::from_u8(v));
-    }
-
-    Ok(ratings_map)
-  }
-
   fn set_rating(&mut self, img_name: String, rating: Rating)->Result<(), RatingsSaveError> {
-    if let Rating::Low = rating {
-      self.ratings.remove(&img_name);
-    } else {
-      self.ratings.insert(img_name, rating);
-    }
-
+    self.ratings_data.ratings.insert(img_name, rating);
     self.save_ratings()
   }
 
   fn get_rating(&self, img_name: &String)->Rating {
-    if let Some(rating) = self.ratings.get(img_name) {
-      *rating
-    } else {
-      Rating::Low
-    }
+    *self.ratings_data.ratings.get(img_name).unwrap()
   }
 
   fn save_ratings(&self)->Result<(), RatingsSaveError> {
-    let ratings_ser = RatingsSerialize { ratings: &self.ratings };
-
-    let s = serde_yaml::to_string(&ratings_ser)?;
+    let s = serde_yaml::to_string(&self.ratings_data)?;
 
     let mut tmp_file = tempfile::NamedTempFile::new_in(&self.folder_path)?;
     tmp_file.as_file_mut().write(s.as_bytes())?;
     tmp_file.persist(&self.ratings_file_path)?;
 
-    
     Ok(())
+  }
+
+  fn filter_ratings(&self, rating: Rating)->Vec<&String> {
+    self.ratings_data.ratings.iter().filter(|kv| *kv.1 == rating).map(|kv| kv.0).collect()
   }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Rating {
   Low,
   Medium,
@@ -351,17 +344,58 @@ impl Rating {
   pub fn max()->u8 { return 2; }
 }
 
-struct RatingsSerialize<'a> {
-  ratings: &'a HashMap<String, Rating>
+struct RatingsData {
+  ratings: HashMap<String, Rating>,
+  orphaned_ratings: HashMap<String, Rating>
+}
+
+impl RatingsData {
+  fn load<V>(file_path: &Path, known_images: &HashMap<String, V>)->Result<RatingsData, RatingsLoadError> {
+    if file_path.is_dir() {
+      return Err(RatingsLoadError::PathIsDir);
+    }
+
+    let mut data = RatingsData {
+      ratings: HashMap::with_capacity(known_images.len()),
+      orphaned_ratings: HashMap::new()
+    };
+
+      // give all images a default Low rating
+    for img_name in known_images.keys() {
+      data.ratings.insert(img_name.clone(), Rating::Low);
+    }
+
+    if !file_path.exists() {
+      return Ok(data);
+    }
+
+    let file = File::open(file_path)?;
+    let mut deser_map: HashMap<String, u8> = serde_yaml::from_reader(file)?;
+
+      // split the saved ratings into ratings that match up with images in the folder,
+      // and 'orphaned' ratings that are ignored, but will be written out to file again on saving
+    for (img_name, rating_u8) in deser_map.drain() {
+      let rating = Rating::from_u8(rating_u8);
+      if known_images.contains_key(&img_name) {
+        data.ratings.insert(img_name, rating);
+      } else {
+        data.orphaned_ratings.insert(img_name, rating);
+      }
+    }
+
+    println!("Ratings len: {}, orphaned len: {}", data.ratings.len(), data.orphaned_ratings.len());
+
+    Ok(data)
+  }
 }
 
 use serde::ser::{Serialize, Serializer, SerializeMap};
-
-impl<'a> Serialize for RatingsSerialize<'a> {
+impl Serialize for RatingsData {
+    // merges ratings and orphaned_ratings, and writes them out as a string: u8 map. Ratings are converted to u8. The written map is also sorted by key.
   fn serialize<S>(&self, serializer: S)->Result<S::Ok, S::Error>
     where S: Serializer
   {
-    let mut entries: Vec<_> = self.ratings.iter().collect();
+    let mut entries: Vec<_> = self.ratings.iter().chain(self.orphaned_ratings.iter()).collect();
     entries.sort_unstable_by_key(|kv| kv.0);
 
     let mut map = serializer.serialize_map(Some(entries.len()))?;
@@ -449,8 +483,6 @@ impl Error for RatingsLoadError {
     }
   }
 }
-
-
 
 impl From<io::Error> for RatingsLoadError {
   fn from(error: io::Error)->Self {

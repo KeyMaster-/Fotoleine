@@ -64,11 +64,12 @@ impl ImageLoadingPolicy {
     return 1 + self.buffer_zone_count * 2 + self.load_behind_count + self.load_ahead_count;
   }
 
-  pub fn get_load_range(&self, pivot: usize, shown_idx: usize, max: usize)->(usize, RangeInclusive<usize>) { // new pivot, load range
+    // which images to load based on the policy, in order of priority
+  pub fn get_load_set(&self, pivot: usize, shown_idx: usize, max: usize)->(usize, Vec<usize>) { // new pivot, load range
     if self.buffer_zone_range(pivot).contains(&(shown_idx as i32)) {
-      (pivot, self.range_around_pivot(pivot, max))
+      (pivot, self.load_set_around_pivot(pivot, max))
     } else {
-      (shown_idx, self.range_around_pivot(shown_idx, max))
+      (shown_idx, self.load_set_around_pivot(shown_idx, max))
     }
   }
 
@@ -79,14 +80,32 @@ impl ImageLoadingPolicy {
     start..=end
   }
 
-  fn range_around_pivot(&self, pivot: usize, max: usize)->RangeInclusive<usize> {
+  fn load_set_around_pivot(&self, pivot: usize, max: usize)->Vec<usize> {
     let start = (pivot as i32) - (self.buffer_zone_count as i32) - (self.load_behind_count as i32);
     let end = (pivot as i32) + (self.buffer_zone_count as i32) + (self.load_ahead_count as i32);
 
     let start = clamp(start, 0, (max - 1) as i32) as usize;
     let end = clamp(end, 0, (max - 1) as i32) as usize;
 
-    start..=end
+    let mut idxs: Vec<_> = (start..=end).collect();
+    idxs.sort_unstable_by(|&a, &b| {
+
+      let a_ahead = a >= pivot;
+      let b_ahead = b >= pivot;
+
+      let a_dist = (pivot as i32 - a as i32).abs();
+      let b_dist = (pivot as i32 - b as i32).abs();
+
+      // the sort function sorts in increasing size
+      // so if we want a to be before b, the ordering should be Less, i.e. a < b
+
+        // prioritize loading any images ahead of (i.e. after) the pivot over those before
+        // false compares as Less to true, so reverse to get Less if a is ahead, and b is not
+      a_ahead.cmp(&b_ahead).reverse()
+        .then(a_dist.cmp(&b_dist)) // if on the same side, prioritize images closer to the pivot
+    });
+
+    idxs
   }
 }
 
