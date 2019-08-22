@@ -2,7 +2,7 @@
 Fotoleine is a photo viewer designed for my workflow of reviewing the photos I have taken.
 It supports loading a folder of JPG images, flicking through them in order, and assigning ratings to each.
 
-![Fotoleine screenshot](preview.png)
+![Fotoleine screenshot](preview.jpg)
 
 ## Usage
 
