@@ -21,7 +21,8 @@ pub struct LoadedDir {
   loaded_images: HashMap<usize, PlacedImage>, // all loaded images. keys index into collection
   pending_loads: HashSet<usize>, // keys index into collection
 
-  ratings: ImageRatings
+  ratings: ImageRatings,
+  rating_filter: Option<Rating>
 }
 
 fn offset_idx(idx: usize, max: usize, offset: i32)->usize {
@@ -74,6 +75,7 @@ impl LoadedDir {
       loaded_images,
       pending_loads,
       ratings,
+      rating_filter: None
     };
 
     loaded_dir.update_loaded(services);
@@ -127,14 +129,33 @@ impl LoadedDir {
     self.ratings.get_rating(&file_name)
   }
 
-  pub fn set_rating_filter(&mut self, rating: Option<Rating>) {
-    if let Some(rating) = rating {
-      let file_names = self.ratings.filter_ratings(rating);
-      let mut idxs: Vec<_> = file_names.iter().filter_map(|&file_name| self.name_to_idx.get(file_name)).collect();
-      idxs.sort_unstable();
+  pub fn set_rating_filter(&mut self, rating: Option<Rating>, services: &ImageHandlingServices) {
+    let new_active_idxs = 
+      if let Some(rating) = rating {
+        let file_names = self.ratings.filter_ratings(rating);
+        let mut idxs: Vec<_> = file_names.iter().filter_map(|&file_name| self.name_to_idx.get(file_name)).map(|idx| *idx).collect();
+        idxs.sort_unstable();
 
-      println!("{:?}", idxs);
-    }
+        idxs
+      } else {
+        (0..self.collection.len()).collect()
+      };
+
+    let coll_idx = self.current_collection_idx();
+    let new_current = match new_active_idxs.binary_search(&coll_idx) {
+      Ok(idx) => idx,
+      Err(idx) => idx
+    };
+
+    self.rating_filter = rating;
+    self.active_idxs = new_active_idxs;
+    self.load_pivot = new_current;
+    self.current_idx = new_current;
+    self.update_loaded(services);
+  }
+
+  pub fn get_rating_filter(&self)->Option<Rating> {
+    self.rating_filter
   }
 
   fn update_loaded(&mut self, services: &ImageHandlingServices) {

@@ -82,6 +82,7 @@ impl Fotoleine {
             let text_height_adjust = 5.0; // the amount of space to remove from the bottom of the text height, to get better spacing and alignment overall. Necessary since I can't get the text baseline position from imgui
 
             let rating_line_spacing = 20.0;
+            let filter_border_padding = 5.0;
 
               // image index in folder
             let collection_count = loaded_dir.collection_image_count();
@@ -165,6 +166,12 @@ impl Fotoleine {
                   }
                 } else {
                   draw_list.add_line([line_left, line_height], [line_right, line_height], col).build();
+                }
+
+                if let Some(filter_rating) = loaded_dir.get_rating_filter() {
+                  if filter_rating.to_u8() == i {
+                    draw_list.add_rect([line_left - filter_border_padding, line_height - filter_border_padding], [line_right + filter_border_padding + 1.0, line_height + filter_border_padding + 1.0], col).filled(false).build();
+                  }
                 }
               }
             }
@@ -315,24 +322,24 @@ impl Program for Fotoleine {
       }
 
       if ui.is_key_pressed(VirtualKeyCode::Escape as _) {
-        loaded_dir.set_rating_filter(None);
+        loaded_dir.set_rating_filter(None, &self.image_handling.services);
       }
 
       if ui.io().key_super {
         if ui.is_key_pressed(VirtualKeyCode::Key1 as _) {
-          loaded_dir.set_rating_filter(Some(Rating::Low));
+          loaded_dir.set_rating_filter(Some(Rating::Low), &self.image_handling.services);
         } else if ui.is_key_pressed(VirtualKeyCode::Key2 as _) {
-          loaded_dir.set_rating_filter(Some(Rating::Medium))
+          loaded_dir.set_rating_filter(Some(Rating::Medium), &self.image_handling.services);
         } else if ui.is_key_pressed(VirtualKeyCode::Key3 as _) {
-          loaded_dir.set_rating_filter(Some(Rating::High))
+          loaded_dir.set_rating_filter(Some(Rating::High), &self.image_handling.services);
         }
       } else {
         if ui.is_key_pressed(VirtualKeyCode::Key1 as _) {
           loaded_dir.set_current_rating(Rating::Low);
         } else if ui.is_key_pressed(VirtualKeyCode::Key2 as _) {
-          loaded_dir.set_current_rating(Rating::Medium)
+          loaded_dir.set_current_rating(Rating::Medium);
         } else if ui.is_key_pressed(VirtualKeyCode::Key3 as _) {
-          loaded_dir.set_current_rating(Rating::High)
+          loaded_dir.set_current_rating(Rating::High);
         }  
       }
     }
