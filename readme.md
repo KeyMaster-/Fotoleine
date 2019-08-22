@@ -6,7 +6,7 @@ It supports loading a folder of JPG images, flicking through them in order, and 
 
 - **Loading:** Drag the folder into Fotoleine.
 - **A/D:** Move to the previous/next image.
-- **1/2/3:** Assign a low/medium/high rating to the currently shown image. The current rating for the shown image is displayed in the bottom left.
+- **1/2/3:** Assign a low/medium/high rating to the currently shown image. The current rating for the shown image is displayed in the bottom left. Ratings are saved in a `ratings.yaml` file created in the loaded folder.
 - **Cmd+1/2/3:** Set a filter to only display images with a low/medium/high rating.
 - **Escape:** Clear any rating filter.
 - **U:** Hide/Show the UI.
