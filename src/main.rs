@@ -312,11 +312,6 @@ impl Program for Fotoleine {
         }
       }
 
-      if ui.is_key_pressed(VirtualKeyCode::P as _) {
-        let path = loaded_dir.current_path();
-        println!("Current shown image is at {}", path.display());
-      }
-
       if ui.is_key_pressed(VirtualKeyCode::U as _) {
         self.show_ui = !self.show_ui;
       }
@@ -366,7 +361,6 @@ impl Program for Fotoleine {
   }
 
   fn on_shutdown(&mut self) {
-    println!("Shutting down");
   }
 }
 
