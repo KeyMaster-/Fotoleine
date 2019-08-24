@@ -366,7 +366,7 @@ impl Program for Fotoleine {
 
 fn main() {
   let display_size = LogicalSize::new(1280.0, 720.0);
-  let (event_loop, mut imgui, framework) = init("fotoleine", &display_size);
+  let (event_loop, mut imgui, framework) = init("Fotoleine", &display_size);
   let fotoleine = Fotoleine::init(framework, &display_size, &mut imgui, &event_loop).expect("Couldn't initialize Fotoleine.");
 
   run(event_loop, imgui, fotoleine);
