@@ -225,7 +225,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "fotoleine"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "glium 0.26.0-alpha1",
  "imgui 0.1.0-pre-glutin",

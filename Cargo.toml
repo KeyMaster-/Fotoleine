@@ -3,8 +3,15 @@ name = "fotoleine"
 version = "1.0.0"
 authors = ["Tilman Schmidt <AccessKeymaster@gmx.net>"]
 edition = "2018"
+description = "Custom Image Viewer"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package.metadata.bundle]
+name = "Fotoleine"
+identifier = "com.keymaster.fotoleine"
+version = "1.0.0"
+icon = ["resources/Icon.appiconset/Icon_512@2x.png", "resources/Icon.appiconset/Icon_512.png"]
+copyright = "Copyright (c) 2019 Tilman Schmidt. MIT License."
+category = "public.app-category.photography"
 
 [dependencies]
 glium = { version = "0.26.0-alpha", default-features = true, path="deps/glium" }
@@ -16,3 +23,4 @@ kamadak-exif = "0.3"
 serde_yaml = "0.8"
 serde = "1.0"
 tempfile = "3.1"
+
