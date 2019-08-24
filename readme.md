@@ -30,3 +30,6 @@ git clone --recursive https://github.com/KeyMaster-/Fotoleine.git
 cd Fotoleine
 cargo run
 ```
+
+[cargo-bundle](https://github.com/burtonageo/cargo-bundle) is supported.
+Run `cargo bundle` to build and create an app for the platform you are on. See the cargo-bundle documentation for more details.
