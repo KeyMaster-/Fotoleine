@@ -289,10 +289,16 @@ impl Program for Fotoleine {
     }
 
     if let Some(ref mut loaded_dir) = self.image_handling.loaded_dir {
+      let offset_distance = if ui.io().key_shift {
+        10
+      } else {
+        1
+      };
+
       if ui.is_key_pressed(VirtualKeyCode::A as _) {
-        loaded_dir.offset_current(-1, &self.image_handling.services);
+        loaded_dir.offset_current(-offset_distance, &self.image_handling.services);
       } else if ui.is_key_pressed(VirtualKeyCode::D as _) {
-        loaded_dir.offset_current( 1, &self.image_handling.services);
+        loaded_dir.offset_current( offset_distance, &self.image_handling.services);
       }
 
       if let Some(ref mut placed_image) = loaded_dir.current_image_mut() {

@@ -146,6 +146,7 @@ impl LoadedDir {
       Ok(idx) => idx,
       Err(idx) => idx
     };
+    let new_current = new_current.max(0).min(new_active_idxs.len() - 1);
 
     self.rating_filter = rating;
     self.active_idxs = new_active_idxs;
@@ -403,8 +404,6 @@ impl RatingsData {
         data.orphaned_ratings.insert(img_name, rating);
       }
     }
-
-    println!("Ratings len: {}, orphaned len: {}", data.ratings.len(), data.orphaned_ratings.len());
 
     Ok(data)
   }
