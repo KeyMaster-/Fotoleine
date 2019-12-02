@@ -295,9 +295,9 @@ impl Program for Fotoleine {
         1
       };
 
-      if ui.is_key_pressed(VirtualKeyCode::A as _) {
+      if ui.is_key_pressed(VirtualKeyCode::A as _) || ui.is_key_pressed(VirtualKeyCode::Left as _) {
         loaded_dir.offset_current(-offset_distance, &self.image_handling.services);
-      } else if ui.is_key_pressed(VirtualKeyCode::D as _) {
+      } else if ui.is_key_pressed(VirtualKeyCode::D as _) || ui.is_key_pressed(VirtualKeyCode::Right as _) {
         loaded_dir.offset_current( offset_distance, &self.image_handling.services);
       }
 
@@ -315,6 +315,18 @@ impl Program for Fotoleine {
 
         if let Err(err) = open_res {
           println!("Couldn't open file {}, error {}", path.display(), err);
+        }
+      }
+
+      if ui.is_key_pressed(VirtualKeyCode::R as _) {
+        let path = loaded_dir.current_path();
+        let open_res = Command::new("open")
+          .arg("-R") // reveal in finder
+          .arg(path.as_os_str())
+          .output();
+
+        if let Err(err) = open_res {
+          println!("Couldn't reveal file {}, error {}", path.display(), err);
         }
       }
 
