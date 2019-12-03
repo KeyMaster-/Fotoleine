@@ -47,6 +47,10 @@ impl LoadedDir {
       .filter(|entry| file_is_relevant(entry)) // filters for JPG files, and guarantees unicode filenames
       .collect();
 
+    if collection.len() == 0 {
+      return Err(DirLoadError::NoRelevantImages);
+    }
+
     collection.sort_unstable_by_key(|entry| entry.file_name());
 
     let mut name_to_idx = HashMap::new();
@@ -251,6 +255,7 @@ fn file_is_relevant(entry:&DirEntry)->bool {
 #[derive(Debug)]
 pub enum DirLoadError {
   NotADirectory,
+  NoRelevantImages,
   IoError(io::Error),
   RatingsLoadError(RatingsLoadError),
 }
@@ -260,6 +265,7 @@ impl fmt::Display for DirLoadError {
     use self::DirLoadError::*;
     match self {
       NotADirectory => write!(f, "Given path is not a directory"),
+      NoRelevantImages => write!(f, "Given directory does not contain any images to display"),
       IoError(error) => write!(f, "Could not read directory entries: {}", error),
       RatingsLoadError(error) => write!(f, "Could not load the ratings file: {}", error),
     }
@@ -271,6 +277,7 @@ impl Error for DirLoadError {
     use self::DirLoadError::*;
     match self {
       NotADirectory => None,
+      NoRelevantImages => None,
       IoError(error) => Some(error),
       RatingsLoadError(error) => Some(error),
     }
