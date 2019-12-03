@@ -1,0 +1,6 @@
+- if active_idxs is empty in loaded_dir, things just crash
+  - happens e.g. if you filter for a rating that hasn't been assigned to anything
+  - hide all "current idx" dependent api behind another api object
+    - current path, current image, current rating, etc. basically everything that indexes into active_idxs
+
+  alternative if to make current_idx an option that's None if active_idxs is empty, but then everything talking about current returns options, so why bother
