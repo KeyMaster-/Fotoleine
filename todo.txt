@@ -4,3 +4,10 @@
     - current path, current image, current rating, etc. basically everything that indexes into active_idxs
 
   alternative if to make current_idx an option that's None if active_idxs is empty, but then everything talking about current returns options, so why bother
+
+- check that load updates are issued when filter is changed. 
+  - seeing some cases where right after changing filter the image to the right is still loading
+
+- fix phantom duplicate inputs
+  - sometimes you skip ahead 2 images instead of 1
+  - current theory is that this is somehow linked to the texture upload pause
