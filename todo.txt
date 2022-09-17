@@ -11,3 +11,6 @@
 - fix phantom duplicate inputs
   - sometimes you skip ahead 2 images instead of 1
   - current theory is that this is somehow linked to the texture upload pause
+
+- figure out why worker_pool does a 1s wait before executing any worker task
+  There's no comment on the line, and the commit that added it has no further context either.
