@@ -303,7 +303,7 @@ impl Program for Fotoleine {
     }
     let ui = imgui.new_frame();
 
-    if ui.is_key_index_pressed(VirtualKeyCode::Q as _) && ui.io().key_super {
+    if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Q as _) && ui.io().key_super {
       loop_signal = LoopSignal::Exit;
     }
 
@@ -314,9 +314,9 @@ impl Program for Fotoleine {
         1
       };
 
-      if ui.is_key_index_pressed(VirtualKeyCode::A as _) || ui.is_key_index_pressed(VirtualKeyCode::Left as _) {
+      if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::A as _) || ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Left as _) {
         loaded_dir.offset_current(-offset_distance, &self.image_handling.services);
-      } else if ui.is_key_index_pressed(VirtualKeyCode::D as _) || ui.is_key_index_pressed(VirtualKeyCode::Right as _) {
+      } else if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::D as _) || ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Right as _) {
         loaded_dir.offset_current( offset_distance, &self.image_handling.services);
       }
 
@@ -324,7 +324,7 @@ impl Program for Fotoleine {
         placed_image.place_to_fit(&self.view_area_size, 0.0);
       };
 
-      if ui.is_key_index_pressed(VirtualKeyCode::O as _) {
+      if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::O as _) {
         let mut path = loaded_dir.current_path();
 
         let res = ["cr2", "cr3"].iter()
@@ -345,7 +345,7 @@ impl Program for Fotoleine {
         }
       }
 
-      if ui.is_key_index_pressed(VirtualKeyCode::R as _) {
+      if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::R as _) {
         let path = loaded_dir.current_path();
         let open_res = Command::new("open")
           .arg("-R") // reveal in finder
@@ -357,28 +357,28 @@ impl Program for Fotoleine {
         }
       }
 
-      if ui.is_key_index_pressed(VirtualKeyCode::U as _) {
+      if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::U as _) {
         self.show_ui = !self.show_ui;
       }
 
-      if ui.is_key_index_pressed(VirtualKeyCode::Escape as _) {
+      if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Escape as _) {
         loaded_dir.set_rating_filter(None, &self.image_handling.services);
       }
 
       if ui.io().key_super {
-        if ui.is_key_index_pressed(VirtualKeyCode::Key1 as _) {
+        if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Key1 as _) {
           loaded_dir.set_rating_filter(Some(Rating::Low), &self.image_handling.services);
-        } else if ui.is_key_index_pressed(VirtualKeyCode::Key2 as _) {
+        } else if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Key2 as _) {
           loaded_dir.set_rating_filter(Some(Rating::Medium), &self.image_handling.services);
-        } else if ui.is_key_index_pressed(VirtualKeyCode::Key3 as _) {
+        } else if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Key3 as _) {
           loaded_dir.set_rating_filter(Some(Rating::High), &self.image_handling.services);
         }
       } else {
-        if ui.is_key_index_pressed(VirtualKeyCode::Key1 as _) {
+        if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Key1 as _) {
           loaded_dir.set_current_rating(Rating::Low);
-        } else if ui.is_key_index_pressed(VirtualKeyCode::Key2 as _) {
+        } else if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Key2 as _) {
           loaded_dir.set_current_rating(Rating::Medium);
-        } else if ui.is_key_index_pressed(VirtualKeyCode::Key3 as _) {
+        } else if ui.is_key_index_pressed_no_repeat(VirtualKeyCode::Key3 as _) {
           loaded_dir.set_current_rating(Rating::High);
         }  
       }
