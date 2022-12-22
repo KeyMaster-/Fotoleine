@@ -2,7 +2,7 @@
 name = "fotoleine"
 version = "1.0.0"
 authors = ["Tilman Schmidt <AccessKeymaster@gmx.net>"]
-edition = "2018"
+edition = "2021"
 description = "Custom Image Viewer"
 
 [package.metadata.bundle]
