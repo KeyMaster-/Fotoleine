@@ -14,3 +14,15 @@
 
 - figure out why worker_pool does a 1s wait before executing any worker task
   There's no comment on the line, and the commit that added it has no further context either.
+
+- Feature: Allow marking non-adjacent pictures in some way then flick just between those.
+  Useful for when I end up with the same motif with some other photos in between, and I want to pick one out of the set.
+
+- Jump to start/end shortcuts
+  If I go through the list once, then filter and want to go from the start again, getting there is laborious with just the "skip 10" controls.
+
+- Allow for easier scroll without load pauses
+  Scrolling through pictures quickly is still slow because there's a lot of loading happening. If I just want to skip ahead 30 it should be fast, and only when I rest somewhere should it start loading (or loading should have no impact on UI times, and loads that got initiated shouldn't block later loads if they'll be immediately irrelevant).
+
+- Thumbnail view
+  Allow for some alternate view that shows e.g. a grid of all the images that can be scrolled, to make it easier to orient yourself in the set.
