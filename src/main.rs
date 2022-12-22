@@ -326,14 +326,22 @@ impl Program for Fotoleine {
 
       if ui.is_key_index_pressed(VirtualKeyCode::O as _) {
         let mut path = loaded_dir.current_path();
-        path.set_extension("cr2");
 
-        let open_res = Command::new("open")
-          .arg(path.as_os_str())
-          .output();
+        let res = ["cr2", "cr3"].iter()
+          .map(|ext| {
+            path.set_extension(ext);
 
-        if let Err(err) = open_res {
-          println!("Couldn't open file {}, error {}", path.display(), err);
+            Command::new("open")
+              .arg(path.as_os_str())
+              .output()
+          })
+          .reduce(Result::or)
+          .unwrap(); // We know we have 2 elements in the iterator
+
+        // Note that if the file couldn't be found, it won't actually error - the command will still have run correctly,
+        // but just print out that the file doesn't exist. Keeping this error handling because might as well.
+        if let Err(err) = res {
+          println!("Couldn't open raw file for path {}, error {}", loaded_dir.current_path().with_extension("").display(), err);
         }
       }
 
