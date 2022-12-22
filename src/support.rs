@@ -1,22 +1,22 @@
 use glium::glutin::ContextBuilder;
 use glium::glutin::window::{WindowBuilder};
-use glium::glutin::event_loop::{EventLoop, ControlFlow};
-use glium::glutin::event::{Event, WindowEvent};
+use glium::glutin::event_loop::{EventLoop, EventLoopBuilder, ControlFlow};
+use glium::glutin::event::Event;
 use glium::glutin::dpi::LogicalSize;
 use glium::Display;
-use imgui::{Context, FontConfig, FontSource, Ui, DrawData};
-use imgui_glium_renderer::GliumRenderer;
+use imgui::{Context, FontConfig, FontSource};
+use imgui_glium_renderer::Renderer;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::time::Instant;
 
 pub struct Framework {
   pub display: Display,
   pub platform: WinitPlatform,
-  pub renderer: GliumRenderer,
+  pub renderer: Renderer,
 }
 
-pub fn init<T>(title: &str, window_size: &LogicalSize) -> (EventLoop<T>, Context, Framework) {
-  let event_loop = EventLoop::<T>::new_user_event();
+pub fn init<T>(title: &str, window_size: &LogicalSize<f64>) -> (EventLoop<T>, Context, Framework) {
+  let event_loop = EventLoopBuilder::with_user_event().build();
   let context = ContextBuilder::new().with_vsync(true);
   let builder = WindowBuilder::new()
     .with_title(title.to_owned())
@@ -48,7 +48,7 @@ pub fn init<T>(title: &str, window_size: &LogicalSize) -> (EventLoop<T>, Context
   imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
 
   let renderer =
-    GliumRenderer::init(&mut imgui, &display).expect("Failed to initialize renderer");
+    Renderer::init(&mut imgui, &display).expect("Failed to initialize renderer");
 
   let framework = Framework {
     display,
@@ -57,24 +57,6 @@ pub fn init<T>(title: &str, window_size: &LogicalSize) -> (EventLoop<T>, Context
   };
 
   (event_loop, imgui, framework)
-}
-
-pub fn begin_frame<'ui>(imgui:&'ui mut Context, platform:&WinitPlatform, display:&Display)->Ui<'ui> {
-  let io = imgui.io_mut();
-  let gl_window = display.gl_window();
-  let window = gl_window.window();
-  platform
-    .prepare_frame(io, window)
-    .expect("Failed to start frame");
-  
-  imgui.frame()
-}
-
-pub fn end_frame<'ui>(ui:Ui<'ui>, platform:&WinitPlatform, display:&Display)->&'ui DrawData {
-  let gl_window = display.gl_window();
-  let window = gl_window.window();
-  platform.prepare_render(&ui, window);
-  ui.render()
 }
 
 pub trait Program {
@@ -111,13 +93,8 @@ pub fn run<P:'static + Program>(event_loop: EventLoop<P::UserEvent>, mut imgui: 
     
     let mut redraw_event = false;
     match event {
-      Event::WindowEvent{event:win_event, .. } => {
-        match win_event {
-          WindowEvent::RedrawRequested => {
-            redraw_event = true;
-          }
-          _ => {}
-        }
+      Event::RedrawRequested(_) => {
+        redraw_event = true;
       },
       Event::LoopDestroyed => {
         program.on_shutdown();
@@ -127,8 +104,9 @@ pub fn run<P:'static + Program>(event_loop: EventLoop<P::UserEvent>, mut imgui: 
 
     if redraw_event || loop_signal == LoopSignal::ImmediateRedraw {
       {
-        let io = imgui.io_mut();
-        last_frame = io.update_delta_time(last_frame);
+        let now = Instant::now();
+        imgui.io_mut().update_delta_time(now - last_frame);
+        last_frame = now;
       }
       
       let frame_loop_signal = program.on_frame(&mut imgui);

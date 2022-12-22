@@ -43,7 +43,7 @@ impl Worker for LoadWorker {
 
     match self.event_loop_proxy.send_event(event_message) {
       Ok(()) => {},
-      Err(EventLoopClosed) => println!("Worker {}: Event loop closed", self.id)
+      Err(EventLoopClosed(_)) => println!("Worker {}: Event loop closed", self.id)
     };
   }
 }

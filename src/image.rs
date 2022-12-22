@@ -101,7 +101,7 @@ impl ImageTexture {
 
 pub struct PlacedImage {
   pub image: ImageTexture,
-  pub pos: LogicalPosition,
+  pub pos: LogicalPosition<f64>,
   pub scale: f64
 }
 
@@ -114,13 +114,13 @@ impl PlacedImage {
     }
   }
 
-  pub fn scaled_size(&self)->LogicalSize {
+  pub fn scaled_size(&self)->LogicalSize<f64> {
     let rotated_size = self.image.rotated_size();
 
     LogicalSize::new((rotated_size[0] as f64) * self.scale, (rotated_size[1] as f64) * self.scale)
   }
 
-  pub fn corner_data(&self)->[(LogicalPosition, [f32; 2]); 4] { // order: tl, tr, br, bl
+  pub fn corner_data(&self)->[(LogicalPosition<f64>, [f32; 2]); 4] { // order: tl, tr, br, bl
     let scaled_size = self.scaled_size();
 
     let pos = [LogicalPosition::new(self.pos.x - scaled_size.width / 2.0, self.pos.y - scaled_size.height / 2.0),
@@ -142,7 +142,7 @@ impl PlacedImage {
   }
 
     // sets scale to fit into a rectangle of `size`, and centers itself within that rectangle
-  pub fn place_to_fit(&mut self, size: &LogicalSize, padding: f64) {
+  pub fn place_to_fit(&mut self, size: &LogicalSize<f64>, padding: f64) {
     let rotated_size = self.image.rotated_size();
 
     let x_scale = (size.width - padding) / (rotated_size[0] as f64);

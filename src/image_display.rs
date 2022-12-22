@@ -24,7 +24,7 @@ pub struct ImageDisplay {
 }
 
 impl ImageDisplay {
-  pub fn new(display: &Display, display_size: &LogicalSize)->Result<ImageDisplay, ImageDisplayCreationError> { //:todo: custom error
+  pub fn new(display: &Display, display_size: &LogicalSize<f64>)->Result<ImageDisplay, ImageDisplayCreationError> { //:todo: custom error
     let vertex_buffer = VertexBuffer::empty_dynamic(display, 4)?;
     let index_buffer  = NoIndices(PrimitiveType::TriangleStrip);
 
@@ -69,7 +69,7 @@ impl ImageDisplay {
     Ok(image_display)
   }
 
-  pub fn set_display_size(&mut self, size: &LogicalSize) {
+  pub fn set_display_size(&mut self, size: &LogicalSize<f64>) {
     self.view_matrix = display_to_gl(size);
   }
 
@@ -89,7 +89,7 @@ impl ImageDisplay {
   }
 }
 
-fn display_to_gl(display_size: &LogicalSize)->[[f32; 4]; 4] {
+fn display_to_gl(display_size: &LogicalSize<f64>)->[[f32; 4]; 4] {
   [[ 2.0 / display_size.width as f32, 0.0, 0.0, 0.0],
    [ 0.0, -2.0 / display_size.height as f32, 0.0, 0.0],
    [ 0.0,  0.0, 1.0, 0.0],

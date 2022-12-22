@@ -8,7 +8,7 @@ use glium::{
 use glium::glutin::event_loop::EventLoop;
 use glium::glutin::event::{Event, WindowEvent, VirtualKeyCode};
 use glium::glutin::dpi::LogicalSize;
-use support::{init, Program, Framework, LoopSignal, run, begin_frame, end_frame};
+use support::{init, Program, Framework, LoopSignal, run};
 use image_display::ImageDisplay;
 use image_handling::{ImageHandling, loader_pool::LoadNotification, Rating};
 
@@ -18,20 +18,21 @@ mod image_handling;
 mod image_display;
 mod worker_pool;
 
-const INVIS_WINDOW_FLAGS: ImGuiWindowFlags = ImGuiWindowFlags::from_bits_truncate(ImGuiWindowFlags::NoBackground.bits() | ImGuiWindowFlags::NoDecoration.bits() | ImGuiWindowFlags::NoInputs.bits() | ImGuiWindowFlags::NoSavedSettings.bits());
+const INVIS_WINDOW_FLAGS: WindowFlags = WindowFlags::from_bits_truncate(WindowFlags::NO_BACKGROUND.bits() | WindowFlags::NO_DECORATION.bits() | WindowFlags::NO_INPUTS.bits() | WindowFlags::NO_SAVED_SETTINGS.bits());
 
 struct Fotoleine {
   framework: Framework,
   font: FontId,
   image_handling: ImageHandling,
   image_display: ImageDisplay,
-  view_area_size: LogicalSize,
+  scale_factor: f64,
+  view_area_size: LogicalSize<f64>,
   bg_col: [f32; 3],
   show_ui: bool
 }
 
 impl Fotoleine {
-  fn init(mut framework: Framework, display_size: &LogicalSize, imgui: &mut Context, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, FotoleineInitError> {
+  fn init(mut framework: Framework, display_size: &LogicalSize<f64>, imgui: &mut Context, event_loop: &EventLoop<LoadNotification>)->Result<Fotoleine, FotoleineInitError> {
     let image_display = ImageDisplay::new(&framework.display, display_size)?;
       // 2 images on either side of shown that can be flicked between without triggering loads. 
       // keep 2 images before the buffer zone
@@ -52,11 +53,14 @@ impl Fotoleine {
     framework.renderer.reload_font_texture(imgui)
       .expect("Couldn't reload font");
 
+    let scale_factor = framework.display.gl_window().window().scale_factor();
+
     Ok(Fotoleine {
       framework,
       font: inter_font,
       image_handling,
       image_display,
+      scale_factor: scale_factor,
       view_area_size: display_size.clone(),
       bg_col: [0.1, 0.1, 0.1],
       show_ui: true
@@ -65,9 +69,11 @@ impl Fotoleine {
 
   fn build_ui(&mut self, ui:&mut Ui) {
     let _font = ui.push_font(self.font);
+
       // disable anything messing with the window drawing area, such that the UI window actually covers the entire drawing area
-    let _window_border = ui.push_style_vars(&[StyleVar::WindowBorderSize(0.0), StyleVar::WindowRounding(0.0), StyleVar::WindowPadding([0.0, 0.0])]);
-    ui.window(im_str!("overlay"))
+    let _window_style = [StyleVar::WindowBorderSize(0.0), StyleVar::WindowRounding(0.0), StyleVar::WindowPadding([0.0, 0.0])].map(|style| ui.push_style_var(style));
+
+    ui.window("overlay")
       .flags(INVIS_WINDOW_FLAGS)
       .position([0.0, 0.0], Condition::Always)
       .size([self.view_area_size.width as f32, self.view_area_size.height as f32], Condition::Always) // :todo: currently assumes view area size is full screen size
@@ -90,11 +96,11 @@ impl Fotoleine {
             let count_str = format!("{}", collection_count);
 
             let text = ImString::new(format!("{}/{}", collection_idx, count_str));
-            let mut text_size = ui.calc_text_size(&text, false, -1.0); // -1.0 means no wrap width
+            let mut text_size = ui.calc_text_size(&text);
             text_size[1] -= text_height_adjust + text_top_adjust;
 
             let widest_text = ImString::new(format!("{}/{}", count_str, count_str));
-            let widest_size = ui.calc_text_size(&widest_text, false, -1.0);
+            let widest_size = ui.calc_text_size(&widest_text);
 
               // dimensions of UI drawing area
             let ui_box_right = self.view_area_size.width as f32 - border_padding - backing_padding_x;
@@ -179,15 +185,15 @@ impl Fotoleine {
 
           {
             if let None = loaded_dir.current_image() {
-              let text = im_str!("Image loading...");
-              let text_size = ui.calc_text_size(&text, false, -1.0); // :todo: move out text alignment utilities into a function & module
+              let text = "Image loading...";
+              let text_size = ui.calc_text_size(&text); // :todo: move out text alignment utilities into a function & module
               ui.set_cursor_pos([(self.view_area_size.width as f32) / 2.0 - text_size[0] / 2.0, (self.view_area_size.height as f32) / 2.0 - text_size[1] / 2.0]);
               ui.text(text);
             }
           }
         } else {
-          let text = im_str!("Drag a folder with images into the window to load it.");
-          let text_size = ui.calc_text_size(&text, false, -1.0);
+          let text = "Drag a folder with images into the window to load it.";
+          let text_size = ui.calc_text_size(&text);
           ui.set_cursor_pos([(self.view_area_size.width as f32) / 2.0 - text_size[0] / 2.0, (self.view_area_size.height as f32) / 2.0 - text_size[1] / 2.0]);
           ui.text(text);
         }
@@ -223,7 +229,7 @@ impl Program for Fotoleine {
 
             // cursor moved not doing an instant redraw might mean that intermediate mouse positions are not detected on long blocking frames
             // so certain hover states may not be detected. this is deemed acceptable though, since doing immediate redraws on mouse movement has a noticeable impact on UI smootheness
-          WindowEvent::Focused { .. } | WindowEvent::HiDpiFactorChanged { .. } |
+          WindowEvent::Focused { .. } | WindowEvent::ScaleFactorChanged { .. } |
           WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. }
             => LoopSignal::RequestRedraw,          
 
@@ -241,11 +247,16 @@ impl Program for Fotoleine {
             let load_res = self.image_handling.load_path(&path);
             if let Err(load_error) = load_res {
               println!("Couldn't load path {}: {}", path.display(), load_error);
-            } 
+            }
+          },
+          WindowEvent::ScaleFactorChanged{ scale_factor, .. } => {
+            self.scale_factor = *scale_factor;
+            // Updating view area etc should be handled by the subsequent Resized event
           },
           WindowEvent::Resized(size) => {
-            self.view_area_size = size.clone();
-            self.image_display.set_display_size(size);
+            let logical_size = size.to_logical(self.scale_factor);
+            self.view_area_size = logical_size;
+            self.image_display.set_display_size(&logical_size);
           },
           _ => {}
         }
@@ -282,9 +293,17 @@ impl Program for Fotoleine {
   fn on_frame(&mut self, imgui: &mut Context)->LoopSignal {
     let mut loop_signal = LoopSignal::Wait;
 
-    let mut ui = begin_frame(imgui, &self.framework.platform, &self.framework.display);
+    {
+      let io = imgui.io_mut();
+      let gl_window = self.framework.display.gl_window();
+      let window = gl_window.window();
+      self.framework.platform
+        .prepare_frame(io, window)
+        .expect("Failed to start frame");
+    }
+    let ui = imgui.new_frame();
 
-    if ui.is_key_pressed(VirtualKeyCode::Q as _) && ui.io().key_super {
+    if ui.is_key_index_pressed(VirtualKeyCode::Q as _) && ui.io().key_super {
       loop_signal = LoopSignal::Exit;
     }
 
@@ -295,9 +314,9 @@ impl Program for Fotoleine {
         1
       };
 
-      if ui.is_key_pressed(VirtualKeyCode::A as _) || ui.is_key_pressed(VirtualKeyCode::Left as _) {
+      if ui.is_key_index_pressed(VirtualKeyCode::A as _) || ui.is_key_index_pressed(VirtualKeyCode::Left as _) {
         loaded_dir.offset_current(-offset_distance, &self.image_handling.services);
-      } else if ui.is_key_pressed(VirtualKeyCode::D as _) || ui.is_key_pressed(VirtualKeyCode::Right as _) {
+      } else if ui.is_key_index_pressed(VirtualKeyCode::D as _) || ui.is_key_index_pressed(VirtualKeyCode::Right as _) {
         loaded_dir.offset_current( offset_distance, &self.image_handling.services);
       }
 
@@ -305,7 +324,7 @@ impl Program for Fotoleine {
         placed_image.place_to_fit(&self.view_area_size, 0.0);
       };
 
-      if ui.is_key_pressed(VirtualKeyCode::O as _) {
+      if ui.is_key_index_pressed(VirtualKeyCode::O as _) {
         let mut path = loaded_dir.current_path();
         path.set_extension("cr2");
 
@@ -318,7 +337,7 @@ impl Program for Fotoleine {
         }
       }
 
-      if ui.is_key_pressed(VirtualKeyCode::R as _) {
+      if ui.is_key_index_pressed(VirtualKeyCode::R as _) {
         let path = loaded_dir.current_path();
         let open_res = Command::new("open")
           .arg("-R") // reveal in finder
@@ -330,39 +349,40 @@ impl Program for Fotoleine {
         }
       }
 
-      if ui.is_key_pressed(VirtualKeyCode::U as _) {
+      if ui.is_key_index_pressed(VirtualKeyCode::U as _) {
         self.show_ui = !self.show_ui;
       }
 
-      if ui.is_key_pressed(VirtualKeyCode::Escape as _) {
+      if ui.is_key_index_pressed(VirtualKeyCode::Escape as _) {
         loaded_dir.set_rating_filter(None, &self.image_handling.services);
       }
 
       if ui.io().key_super {
-        if ui.is_key_pressed(VirtualKeyCode::Key1 as _) {
+        if ui.is_key_index_pressed(VirtualKeyCode::Key1 as _) {
           loaded_dir.set_rating_filter(Some(Rating::Low), &self.image_handling.services);
-        } else if ui.is_key_pressed(VirtualKeyCode::Key2 as _) {
+        } else if ui.is_key_index_pressed(VirtualKeyCode::Key2 as _) {
           loaded_dir.set_rating_filter(Some(Rating::Medium), &self.image_handling.services);
-        } else if ui.is_key_pressed(VirtualKeyCode::Key3 as _) {
+        } else if ui.is_key_index_pressed(VirtualKeyCode::Key3 as _) {
           loaded_dir.set_rating_filter(Some(Rating::High), &self.image_handling.services);
         }
       } else {
-        if ui.is_key_pressed(VirtualKeyCode::Key1 as _) {
+        if ui.is_key_index_pressed(VirtualKeyCode::Key1 as _) {
           loaded_dir.set_current_rating(Rating::Low);
-        } else if ui.is_key_pressed(VirtualKeyCode::Key2 as _) {
+        } else if ui.is_key_index_pressed(VirtualKeyCode::Key2 as _) {
           loaded_dir.set_current_rating(Rating::Medium);
-        } else if ui.is_key_pressed(VirtualKeyCode::Key3 as _) {
+        } else if ui.is_key_index_pressed(VirtualKeyCode::Key3 as _) {
           loaded_dir.set_current_rating(Rating::High);
         }  
       }
     }
 
-    self.build_ui(&mut ui);
+    self.build_ui(ui);
 
-    let draw_data = end_frame(ui, &self.framework.platform, &self.framework.display);
+    self.framework.platform.prepare_render(ui, self.framework.display.gl_window().window());
+    let draw_data = imgui.render();
 
     let mut target = self.framework.display.draw();
-    target.clear_color_srgb(self.bg_col[0], self.bg_col[1], self.bg_col[2], 1.0);
+    target.clear_color(self.bg_col[0], self.bg_col[1], self.bg_col[2], 1.0);
 
     if let Some(ref loaded_dir) = self.image_handling.loaded_dir {
       if let Some(ref placed_image) = loaded_dir.current_image() {
@@ -393,7 +413,7 @@ fn main() {
 #[derive(Debug)]
 enum FotoleineInitError {
   ImageDisplayCreationError(image_display::ImageDisplayCreationError),
-  GliumRendererError(imgui_glium_renderer::GliumRendererError),
+  GliumRendererError(imgui_glium_renderer::RendererError),
 }
 
 use std::fmt;
@@ -423,8 +443,8 @@ impl From<image_display::ImageDisplayCreationError> for FotoleineInitError {
   }
 }
 
-impl From<imgui_glium_renderer::GliumRendererError> for FotoleineInitError {
-  fn from(error: imgui_glium_renderer::GliumRendererError)->Self {
+impl From<imgui_glium_renderer::RendererError> for FotoleineInitError {
+  fn from(error: imgui_glium_renderer::RendererError)->Self {
     FotoleineInitError::GliumRendererError(error)
   }
 }
